@@ -279,3 +279,35 @@ input[type="range"]::-moz-range-thumb {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+.app-shell {
+  background: #f8fafc;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+.metric-card {
+  padding: 14px;
+}
+
+.metric-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.metric-label { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #334155; }
+.metric-meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.metric-value { font-size: 28px; line-height: 1; font-weight: 700; color: #0f172a; }
+.metric-max { font-size: 12px; color: #64748b; font-weight: 500; }
+.metric-progress-bg { height: 6px; width: 100%; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+.metric-progress-fill { height: 100%; border-radius: 999px; transition: width .7s ease; }
