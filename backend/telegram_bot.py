@@ -112,19 +112,12 @@ async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 *Reddit Setup*\n\n"
-        "Configure Reddit credentials in the Mini App settings,\n"
-        "or set these environment variables:\n"
-        "```\n"
-        "REDDIT_CLIENT_ID=\n"
-        "REDDIT_CLIENT_SECRET=\n"
-        "REDDIT_USERNAME=\n"
-        "REDDIT_PASSWORD=\n"
-        "```\n\n"
-        "📝 To create a Reddit app:\n"
-        "1. Go to https://www.reddit.com/prefs/apps\n"
-        "2. Click 'Create App'\n"
-        "3. Choose 'script' type\n"
-        "4. Set redirect URI to http://localhost:8080",
+        "Connect your Reddit account via OAuth:\n\n"
+        "1. Open the Mini App (Settings → Reddit)\n"
+        "2. Click *Connect via Reddit OAuth*\n"
+        "3. Authorize Engagr in the popup\n"
+        "4. Done! No passwords needed ✅\n\n"
+        "💡 Your account is connected securely using OAuth tokens.",
         parse_mode="Markdown",
     )
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from telegram import BotCommand
 
 # Add backend dir to path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -173,34 +174,7 @@ def resume_session(user_id):
         return jsonify({"error": str(e)}), 500
 
 
-# ── Onboarding ────────────────────────────────────────
-
-@api.route("/api/onboarding/reddit", methods=["POST"])
-def onboarding_reddit():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id", "")
-        
-        if not user_id:
-            return jsonify({"error": "user_id is required"}), 400
-        
-        reddit_settings = {
-            "reddit": {
-                "connected": True,
-                "client_id": data.get("client_id", ""),
-                "client_secret": data.get("client_secret", ""),
-                "username": data.get("username", ""),
-                "password": data.get("password", ""),
-            }
-        }
-        
-        storage.update_settings(user_id, reddit_settings)
-        sched_module.schedule_user_sessions(user_id)
-        
-        return jsonify({"status": "connected"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+# ── Onboarding / LinkedIn ─────────────────────────────
 
 @api.route("/api/onboarding/linkedin/status/<user_id>", methods=["GET"])
 def linkedin_status(user_id):
@@ -209,6 +183,192 @@ def linkedin_status(user_id):
     if connected:
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
     return jsonify({"connected": connected})
+
+
+# ── Reddit OAuth ──────────────────────────────────────
+
+import secrets
+import urllib.parse
+import requests as http_requests
+
+# In-memory state store (state -> user_id) for CSRF protection
+_reddit_oauth_states: dict[str, str] = {}
+
+
+@api.route("/api/reddit/auth-url", methods=["POST"])
+def reddit_auth_url():
+    """Generate Reddit OAuth authorization URL."""
+    from config import REDDIT_CLIENT_ID, REDDIT_REDIRECT_URI
+
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id", "")
+
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+
+        if not REDDIT_CLIENT_ID or not REDDIT_REDIRECT_URI:
+            return jsonify({"error": "Reddit OAuth not configured on server"}), 500
+
+        # Generate CSRF state token
+        state = secrets.token_urlsafe(32)
+        _reddit_oauth_states[state] = user_id
+
+        params = {
+            "client_id": REDDIT_CLIENT_ID,
+            "response_type": "code",
+            "state": state,
+            "redirect_uri": REDDIT_REDIRECT_URI,
+            "duration": "permanent",
+            "scope": "identity submit read vote",
+        }
+
+        auth_url = f"https://www.reddit.com/api/v1/authorize?{urllib.parse.urlencode(params)}"
+        return jsonify({"url": auth_url, "state": state})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/reddit/callback", methods=["GET"])
+def reddit_callback():
+    """Handle Reddit OAuth callback — exchange code for tokens."""
+    from config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_REDIRECT_URI
+
+    try:
+        code = request.args.get("code", "")
+        state = request.args.get("state", "")
+        error = request.args.get("error", "")
+
+        if error:
+            return f"""
+            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
+            <h2>❌ Reddit authorization denied</h2>
+            <p>{error}</p>
+            <p>You can close this window.</p>
+            </body></html>
+            """, 400
+
+        if not code or not state:
+            return jsonify({"error": "Missing code or state"}), 400
+
+        # Validate state
+        user_id = _reddit_oauth_states.pop(state, None)
+        if not user_id:
+            return jsonify({"error": "Invalid or expired state token"}), 400
+
+        # Exchange code for tokens
+        token_response = http_requests.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET),
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": REDDIT_REDIRECT_URI,
+            },
+            headers={"User-Agent": "Engagr:v1.0 (OAuth2)"},
+        )
+
+        token_data = token_response.json()
+
+        if "error" in token_data:
+            logger.error(f"Reddit token exchange failed: {token_data}")
+            return f"""
+            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
+            <h2>❌ Reddit connection failed</h2>
+            <p>{token_data.get('error', 'Unknown error')}</p>
+            <p>You can close this window and try again.</p>
+            </body></html>
+            """, 400
+
+        refresh_token = token_data.get("refresh_token", "")
+        access_token = token_data.get("access_token", "")
+
+        if not refresh_token:
+            return f"""
+            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
+            <h2>❌ No refresh token received</h2>
+            <p>Make sure the app is set to "permanent" duration.</p>
+            </body></html>
+            """, 400
+
+        # Get Reddit username
+        reddit_username = ""
+        try:
+            me_response = http_requests.get(
+                "https://oauth.reddit.com/api/v1/me",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "User-Agent": "Engagr:v1.0 (OAuth2)",
+                },
+            )
+            me_data = me_response.json()
+            reddit_username = me_data.get("name", "")
+        except Exception as e:
+            logger.warning(f"Could not fetch Reddit username: {e}")
+
+        # Save to user settings
+        storage.update_settings(user_id, {
+            "reddit": {
+                "connected": True,
+                "refresh_token": refresh_token,
+                "reddit_username": reddit_username,
+            }
+        })
+
+        sched_module.schedule_user_sessions(user_id)
+
+        logger.info(f"Reddit OAuth connected for user {user_id} as u/{reddit_username}")
+
+        # Success page
+        return f"""
+        <html>
+        <body style="font-family:system-ui;text-align:center;padding:60px;background:#f9fafb;">
+        <div style="background:white;border-radius:16px;padding:40px;max-width:400px;margin:0 auto;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <div style="font-size:48px;margin-bottom:16px;">✅</div>
+            <h2 style="margin:0 0 8px;">Reddit Connected!</h2>
+            <p style="color:#666;margin:0 0 16px;">Logged in as <strong>u/{reddit_username}</strong></p>
+            <p style="color:#999;font-size:14px;">You can close this window and return to the app.</p>
+        </div>
+        </body>
+        </html>
+        """
+
+    except Exception as e:
+        logger.error(f"Reddit OAuth callback error: {e}")
+        return f"""
+        <html><body style="font-family:system-ui;text-align:center;padding:60px;">
+        <h2>❌ Something went wrong</h2>
+        <p>{str(e)}</p>
+        </body></html>
+        """, 500
+
+
+@api.route("/api/reddit/status/<user_id>", methods=["GET"])
+def reddit_status(user_id):
+    """Check if Reddit is connected for a user."""
+    settings = storage.get_settings(user_id)
+    reddit_cfg = settings.get("reddit", {})
+    return jsonify({
+        "connected": reddit_cfg.get("connected", False),
+        "username": reddit_cfg.get("reddit_username", ""),
+    })
+
+
+@api.route("/api/reddit/disconnect/<user_id>", methods=["POST"])
+def reddit_disconnect(user_id):
+    """Disconnect Reddit OAuth for a user."""
+    try:
+        storage.update_settings(user_id, {
+            "reddit": {
+                "connected": False,
+                "refresh_token": "",
+                "reddit_username": "",
+            }
+        })
+        return jsonify({"status": "disconnected"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Background Posting ────────────────────────────────

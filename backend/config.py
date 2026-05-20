@@ -25,11 +25,10 @@ GROQ_SYSTEM_PROMPT = (
     "no self-promotion, add real value or ask a genuine question."
 )
 
-# ── Reddit ────────────────────────────────────────────
+# ── Reddit (OAuth) ────────────────────────────────────
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
-REDDIT_USERNAME = os.getenv("REDDIT_USERNAME", "")
-REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD", "")
+REDDIT_REDIRECT_URI = os.getenv("REDDIT_REDIRECT_URI", "")
 
 # ── App ───────────────────────────────────────────────
 APP_ENV = os.getenv("APP_ENV", "development")
@@ -72,10 +71,8 @@ DEFAULT_SETTINGS = {
     },
     "reddit": {
         "connected": False,
-        "client_id": "",
-        "client_secret": "",
-        "username": "",
-        "password": "",
+        "reddit_username": "",
+        "refresh_token": "",
         "subreddits": [],
         "keywords": [],
         "comments_per_day": 5,

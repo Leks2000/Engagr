@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { api, userId } from '../App'
 import TagInput from '../components/TagInput'
 import Slider from '../components/Slider'
 
-export default function RedditSettings({ userId, settings, onSettingsUpdate }) {
+export default function RedditSettings({ userId: propUserId, settings, onSettingsUpdate }) {
   const rd = settings?.reddit || {}
+  const uid = propUserId || userId
 
   const [subreddits, setSubreddits] = useState(rd.subreddits || [])
   const [keywords, setKeywords] = useState(rd.keywords || [])
@@ -11,6 +13,16 @@ export default function RedditSettings({ userId, settings, onSettingsUpdate }) {
   const [sessionTimes, setSessionTimes] = useState(rd.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const pollRef = useRef(null)
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
 
   const markDirty = () => setDirty(true)
 
@@ -25,6 +37,66 @@ export default function RedditSettings({ userId, settings, onSettingsUpdate }) {
       },
     })
     setDirty(false)
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    try {
+      const data = await api.post('/api/reddit/auth-url', { user_id: uid })
+      const authUrl = data.url
+
+      // Open Reddit OAuth in a new window
+      const popup = window.open(authUrl, 'reddit_oauth', 'width=600,height=700')
+
+      // Poll for connection status
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.get(`/api/reddit/status/${uid}`)
+          if (status.connected) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setConnecting(false)
+            // Reload settings in parent
+            onSettingsUpdate({
+              reddit: {
+                ...rd,
+                connected: true,
+                reddit_username: status.username || '',
+              },
+            })
+            if (popup && !popup.closed) popup.close()
+          }
+        } catch (e) {}
+      }, 2000)
+
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+          setConnecting(false)
+        }
+      }, 300000)
+
+    } catch (e) {
+      setConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      await api.post(`/api/reddit/disconnect/${uid}`)
+      onSettingsUpdate({
+        reddit: {
+          ...rd,
+          connected: false,
+          reddit_username: '',
+          refresh_token: '',
+        },
+      })
+    } catch (e) {}
+    setDisconnecting(false)
   }
 
   const addSessionTime = () => {
@@ -57,6 +129,53 @@ export default function RedditSettings({ userId, settings, onSettingsUpdate }) {
           </span>
         )}
       </div>
+
+      {/* Connection Card */}
+      <Section title="Account" subtitle={rd.connected ? `Logged in as u/${rd.reddit_username || '...'}` : 'Connect your Reddit account'}>
+        {rd.connected ? (
+          <div className="card flex items-center justify-between py-3">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#FF4500">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.8 11.33c.02.16.03.33.03.5 0 2.55-2.97 4.63-6.63 4.63s-6.63-2.07-6.63-4.63c0-.17.01-.34.03-.5A1.45 1.45 0 013.2 12c0-.81.66-1.47 1.47-1.47.39 0 .74.15 1.01.41 1-.72 2.37-1.18 3.9-1.24l.66-3.12.04-.02 2.15.45c.13-.27.4-.46.72-.46a.82.82 0 01.82.82.82.82 0 01-.82.82.82.82 0 01-.73-.45l-1.93-.41-.59 2.79c1.5.07 2.85.53 3.83 1.24.27-.25.62-.41 1.01-.41.81 0 1.47.66 1.47 1.47 0 .56-.31 1.04-.76 1.29z" />
+              </svg>
+              <span className="text-sm font-medium">u/{rd.reddit_username || '...'}</span>
+            </div>
+            <button
+              className="text-xs px-3 py-1.5 rounded-lg"
+              style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+            </button>
+          </div>
+        ) : (
+          <button
+            className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
+            style={{
+              background: connecting ? '#ccc' : '#FF4500',
+              color: '#fff',
+              border: 'none',
+            }}
+            onClick={handleConnect}
+            disabled={connecting}
+          >
+            {connecting ? (
+              <>
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Waiting for authorization...
+              </>
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.8 11.33c.02.16.03.33.03.5 0 2.55-2.97 4.63-6.63 4.63s-6.63-2.07-6.63-4.63c0-.17.01-.34.03-.5A1.45 1.45 0 013.2 12c0-.81.66-1.47 1.47-1.47.39 0 .74.15 1.01.41 1-.72 2.37-1.18 3.9-1.24l.66-3.12.04-.02 2.15.45c.13-.27.4-.46.72-.46a.82.82 0 01.82.82.82.82 0 01-.82.82.82.82 0 01-.73-.45l-1.93-.41-.59 2.79c1.5.07 2.85.53 3.83 1.24.27-.25.62-.41 1.01-.41.81 0 1.47.66 1.47 1.47 0 .56-.31 1.04-.76 1.29z" />
+                </svg>
+                Connect via Reddit OAuth
+              </>
+            )}
+          </button>
+        )}
+      </Section>
 
       {/* Subreddits */}
       <Section title="Subreddits" subtitle="Target subreddits for engagement">

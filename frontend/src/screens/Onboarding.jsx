@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../App'
 
 const LANGUAGES = [
@@ -11,14 +11,18 @@ const LANGUAGES = [
 export default function Onboarding({ userId, onComplete }) {
   const [step, setStep] = useState(0)
   const [language, setLanguage] = useState('en')
-  const [redditForm, setRedditForm] = useState({
-    client_id: '',
-    client_secret: '',
-    username: '',
-    password: '',
-  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [redditConnected, setRedditConnected] = useState(false)
+  const [redditUsername, setRedditUsername] = useState('')
+  const pollRef = useRef(null)
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
 
   const handleLanguageSelect = async (lang) => {
     setLanguage(lang)
@@ -28,22 +32,51 @@ export default function Onboarding({ userId, onComplete }) {
     setStep(1)
   }
 
-  const handleRedditConnect = async () => {
+  const handleRedditOAuth = async () => {
     setLoading(true)
     setError('')
     try {
-      await api.post('/api/onboarding/reddit', {
-        user_id: userId,
-        ...redditForm,
-      })
-      onComplete()
+      const data = await api.post('/api/reddit/auth-url', { user_id: userId })
+      const authUrl = data.url
+
+      // Open Reddit OAuth in a new window
+      const popup = window.open(authUrl, 'reddit_oauth', 'width=600,height=700')
+
+      // Poll for connection status
+      pollRef.current = setInterval(async () => {
+        try {
+          const status = await api.get(`/api/reddit/status/${userId}`)
+          if (status.connected) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setRedditConnected(true)
+            setRedditUsername(status.username || '')
+            setLoading(false)
+            if (popup && !popup.closed) popup.close()
+          }
+        } catch (e) {}
+      }, 2000)
+
+      // Also stop polling after 5 minutes
+      setTimeout(() => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+          setLoading(false)
+        }
+      }, 300000)
+
     } catch (e) {
-      setError('Failed to connect Reddit. Check your credentials.')
+      setError('Failed to start Reddit OAuth. Server may not be configured.')
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleSkip = () => {
+    onComplete()
+  }
+
+  const handleFinish = () => {
     onComplete()
   }
 
@@ -128,81 +161,77 @@ export default function Onboarding({ userId, onComplete }) {
         </div>
       )}
 
-      {/* Step 2 — Reddit */}
+      {/* Step 2 — Reddit OAuth */}
       {step === 2 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Connect Reddit</h2>
           <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
-            Enter your Reddit API credentials
+            Log in to your Reddit account via OAuth
           </p>
 
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--color-muted)' }}>
-                Client ID
-              </label>
-              <input
-                type="text"
-                className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:border-black transition-colors"
-                placeholder="Reddit app client ID"
-                value={redditForm.client_id}
-                onChange={e => setRedditForm(f => ({ ...f, client_id: e.target.value }))}
-                style={{ borderColor: '#ddd' }}
-              />
+          {redditConnected ? (
+            <div className="card text-center py-8 mb-4">
+              <div className="text-4xl mb-3">✅</div>
+              <p className="font-semibold text-sm mb-1">Reddit Connected!</p>
+              {redditUsername && (
+                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                  Logged in as <strong>u/{redditUsername}</strong>
+                </p>
+              )}
             </div>
-            <div>
-              <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--color-muted)' }}>
-                Client Secret
-              </label>
-              <input
-                type="password"
-                className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:border-black transition-colors"
-                placeholder="Reddit app client secret"
-                value={redditForm.client_secret}
-                onChange={e => setRedditForm(f => ({ ...f, client_secret: e.target.value }))}
-                style={{ borderColor: '#ddd' }}
-              />
+          ) : (
+            <div className="card mb-4">
+              <div className="flex items-start gap-3">
+                <span className="text-xl">🤖</span>
+                <div>
+                  <p className="font-medium text-sm mb-1">One-click connection</p>
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                    Click below to authorize Engagr with your Reddit account. 
+                    No credentials are stored — we use secure OAuth tokens.
+                  </p>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--color-muted)' }}>
-                Username
-              </label>
-              <input
-                type="text"
-                className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:border-black transition-colors"
-                placeholder="Reddit username"
-                value={redditForm.username}
-                onChange={e => setRedditForm(f => ({ ...f, username: e.target.value }))}
-                style={{ borderColor: '#ddd' }}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--color-muted)' }}>
-                Password
-              </label>
-              <input
-                type="password"
-                className="w-full px-3 py-2.5 border rounded-lg text-sm outline-none focus:border-black transition-colors"
-                placeholder="Reddit password"
-                value={redditForm.password}
-                onChange={e => setRedditForm(f => ({ ...f, password: e.target.value }))}
-                style={{ borderColor: '#ddd' }}
-              />
-            </div>
-          </div>
+          )}
 
           {error && (
             <p className="text-xs mt-3" style={{ color: 'var(--color-danger)' }}>{error}</p>
           )}
 
           <div className="flex gap-3 mt-6">
-            <button
-              className="btn flex-1"
-              onClick={handleRedditConnect}
-              disabled={loading}
-            >
-              {loading ? 'Connecting...' : 'Connect Reddit'}
-            </button>
+            {redditConnected ? (
+              <button
+                className="btn flex-1"
+                onClick={handleFinish}
+              >
+                Get Started 🚀
+              </button>
+            ) : (
+              <button
+                className="btn flex-1"
+                onClick={handleRedditOAuth}
+                disabled={loading}
+                style={{
+                  background: loading ? '#ccc' : '#FF4500',
+                  color: '#fff',
+                  border: 'none',
+                }}
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Waiting for authorization...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.8 11.33c.02.16.03.33.03.5 0 2.55-2.97 4.63-6.63 4.63s-6.63-2.07-6.63-4.63c0-.17.01-.34.03-.5A1.45 1.45 0 013.2 12c0-.81.66-1.47 1.47-1.47.39 0 .74.15 1.01.41 1-.72 2.37-1.18 3.9-1.24l.66-3.12.04-.02 2.15.45c.13-.27.4-.46.72-.46a.82.82 0 01.82.82.82.82 0 01-.82.82.82.82 0 01-.73-.45l-1.93-.41-.59 2.79c1.5.07 2.85.53 3.83 1.24.27-.25.62-.41 1.01-.41.81 0 1.47.66 1.47 1.47 0 .56-.31 1.04-.76 1.29z" />
+                    </svg>
+                    Connect via Reddit
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           <button
             className="w-full mt-3 text-sm py-2"

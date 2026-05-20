@@ -1,16 +1,16 @@
 """
-Engagr — Reddit Automation via PRAW
+Engagr — Reddit Automation via PRAW (OAuth)
 Handles: post scraping, commenting, and upvoting.
+Uses OAuth2 refresh tokens — no passwords stored.
 """
 
 import random
 import logging
 import praw
-from praw.models import Submission
 
 from config import (
     REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET,
-    REDDIT_USERNAME, REDDIT_PASSWORD, DAILY_LIMITS
+    REDDIT_REDIRECT_URI, DAILY_LIMITS
 )
 import storage
 
@@ -18,26 +18,27 @@ logger = logging.getLogger(__name__)
 
 
 def _get_reddit(user_id: str) -> praw.Reddit | None:
-    """Get PRAW Reddit instance using per-user or global credentials."""
+    """Get PRAW Reddit instance using per-user OAuth refresh token."""
     settings = storage.get_settings(user_id)
     reddit_cfg = settings.get("reddit", {})
-    
-    client_id = reddit_cfg.get("client_id") or REDDIT_CLIENT_ID
-    client_secret = reddit_cfg.get("client_secret") or REDDIT_CLIENT_SECRET
-    username = reddit_cfg.get("username") or REDDIT_USERNAME
-    password = reddit_cfg.get("password") or REDDIT_PASSWORD
-    
-    if not all([client_id, client_secret, username, password]):
-        logger.warning(f"Reddit credentials not configured for user {user_id}")
+
+    refresh_token = reddit_cfg.get("refresh_token", "")
+
+    if not refresh_token:
+        logger.warning(f"Reddit not connected for user {user_id} (no refresh token)")
         return None
-    
+
+    if not all([REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET]):
+        logger.warning("Reddit app credentials (CLIENT_ID/SECRET) not configured")
+        return None
+
     try:
         reddit = praw.Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            username=username,
-            password=password,
-            user_agent=f"Engagr:v1.0 (by /u/{username})",
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            refresh_token=refresh_token,
+            redirect_uri=REDDIT_REDIRECT_URI,
+            user_agent="Engagr:v1.0 (OAuth2)",
         )
         # Verify auth
         reddit.user.me()
@@ -55,22 +56,22 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
     reddit = _get_reddit(user_id)
     if not reddit:
         return []
-    
+
     settings = storage.get_settings(user_id)
     reddit_cfg = settings.get("reddit", {})
     subreddits = reddit_cfg.get("subreddits", [])
     keywords = reddit_cfg.get("keywords", [])
-    
+
     if not subreddits:
         logger.warning(f"No subreddits configured for user {user_id}")
         return []
-    
+
     posts = []
-    
+
     for sub_name in subreddits:
         try:
             subreddit = reddit.subreddit(sub_name)
-            
+
             # Search by keywords if provided, otherwise get hot posts
             submissions = []
             if keywords:
@@ -82,7 +83,7 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
                         logger.debug(f"Search error in r/{sub_name} for '{keyword}': {e}")
             else:
                 submissions = list(subreddit.hot(limit=10))
-            
+
             for submission in submissions:
                 try:
                     # Skip stickied, low engagement, or self-deleted
@@ -94,17 +95,17 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
                         continue
                     if submission.is_self and not submission.selftext:
                         continue
-                    
+
                     # Skip hiring/spam
                     title_lower = submission.title.lower()
                     skip_words = ["hiring", "job opening", "looking for", "[hiring]"]
                     if any(w in title_lower for w in skip_words):
                         continue
-                    
+
                     text = submission.title
                     if submission.is_self and submission.selftext:
                         text += "\n\n" + submission.selftext
-                    
+
                     posts.append({
                         "id": f"rd_{submission.id}",
                         "platform": "reddit",
@@ -116,15 +117,15 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
                         "author": str(submission.author),
                         "subreddit": sub_name,
                     })
-                    
+
                 except Exception as e:
                     logger.debug(f"Error processing submission: {e}")
                     continue
-            
+
         except Exception as e:
             logger.error(f"Error scraping r/{sub_name}: {e}")
             continue
-    
+
     # Deduplicate
     seen_ids = set()
     unique_posts = []
@@ -132,11 +133,11 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
         if p["id"] not in seen_ids:
             seen_ids.add(p["id"])
             unique_posts.append(p)
-    
+
     # Shuffle and limit
     random.shuffle(unique_posts)
     unique_posts = unique_posts[:max_posts]
-    
+
     logger.info(f"Scraped {len(unique_posts)} Reddit posts for user {user_id}")
     return unique_posts
 
@@ -146,7 +147,7 @@ def post_comment(user_id: str, reddit_id: str, comment: str) -> bool:
     reddit = _get_reddit(user_id)
     if not reddit:
         return False
-    
+
     try:
         submission = reddit.submission(id=reddit_id)
         submission.reply(comment)
@@ -162,7 +163,7 @@ def upvote_post(user_id: str, reddit_id: str) -> bool:
     reddit = _get_reddit(user_id)
     if not reddit:
         return False
-    
+
     try:
         submission = reddit.submission(id=reddit_id)
         submission.upvote()
