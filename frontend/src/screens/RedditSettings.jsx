@@ -10,6 +10,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
   const [subreddits, setSubreddits] = useState(rd.subreddits || [])
   const [keywords, setKeywords] = useState(rd.keywords || [])
   const [commentsPerDay, setCommentsPerDay] = useState(rd.comments_per_day || 5)
+  const [upvotesPerDay, setUpvotesPerDay] = useState(rd.upvotes_per_day || 5)
   const [sessionTimes, setSessionTimes] = useState(rd.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -30,6 +31,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         subreddits,
         keywords,
         comments_per_day: commentsPerDay,
+        upvotes_per_day: upvotesPerDay,
         session_times: sessionTimes,
       },
     })
@@ -143,7 +145,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         ) : (
           <div className="card">
             <div className="flex items-start gap-3 mb-4">
-              <span className="text-xl">🔒</span>
+              <span className="text-xl">🛡️</span>
               <div>
                 <p className="font-medium text-sm mb-1">Secure login</p>
                 <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
@@ -171,8 +173,11 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
               onKeyDown={e => e.key === 'Enter' && handleConnect()}
             />
             {loginError && (
-              <p className="text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
+              <p className="text-xs mb-1" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
             )}
+            <p className="text-[11px] mb-3" style={{ color: 'var(--color-muted)' }}>
+              Tip: API error 400 usually means invalid credentials or Reddit requested an extra verification step.
+            </p>
             <button
               className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
               style={{
@@ -231,11 +236,13 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
       </Section>
 
       {/* Upvotes per day */}
-      <Section title="Upvotes per day" subtitle="Fixed at 5 (maximum safe limit)">
-        <div className="card text-center py-3">
-          <span className="text-2xl font-bold">5</span>
-          <span className="text-xs block" style={{ color: 'var(--color-muted)' }}>per day (fixed)</span>
-        </div>
+      <Section title="Upvotes per day" subtitle={`${upvotesPerDay} upvotes`}>
+        <Slider
+          min={1}
+          max={15}
+          value={upvotesPerDay}
+          onChange={(v) => { setUpvotesPerDay(v); markDirty() }}
+        />
       </Section>
 
       {/* Session times */}

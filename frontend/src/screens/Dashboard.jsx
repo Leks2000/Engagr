@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api, userId } from '../App'
 
-const LIMITS = {
-  linkedin_comments: 15,
-  linkedin_likes: 5,
-  linkedin_adds: 5,
-  reddit_comments: 15,
-  reddit_upvotes: 5,
-}
 
 export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
   const [stats, setStats] = useState(null)
@@ -81,21 +74,21 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
           <StatCard
             label="Comments"
             value={stats?.linkedin_comments || 0}
-            max={LIMITS.linkedin_comments}
+            max={settings?.linkedin?.comments_per_day || 15}
             icon="💬"
             delay={0}
           />
           <StatCard
             label="Likes"
             value={stats?.linkedin_likes || 0}
-            max={LIMITS.linkedin_likes}
+            max={settings?.linkedin?.likes_per_day || 5}
             icon="👍"
             delay={1}
           />
           <StatCard
             label="People"
             value={stats?.linkedin_adds || 0}
-            max={LIMITS.linkedin_adds}
+            max={settings?.linkedin?.people_add_range?.[1] || 5}
             icon="🤝"
             delay={2}
           />
@@ -114,18 +107,25 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
           <StatCard
             label="Comments"
             value={stats?.reddit_comments || 0}
-            max={LIMITS.reddit_comments}
+            max={settings?.reddit?.comments_per_day || 15}
             icon="💬"
             delay={3}
           />
           <StatCard
             label="Upvotes"
             value={stats?.reddit_upvotes || 0}
-            max={LIMITS.reddit_upvotes}
-            icon="⬆️"
+            max={settings?.reddit?.upvotes_per_day || 5}
+            icon="🚀"
             delay={4}
           />
         </div>
+      </div>
+
+      <div className="card mb-4">
+        <h3 className="text-sm font-semibold mb-2">Detailed stats</h3>
+        <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Total actions: {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)+(stats?.linkedin_adds||0)+(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}</p>
+        <p className="text-xs" style={{ color: 'var(--color-muted)' }}>LinkedIn engagement: {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)}</p>
+        <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Reddit engagement: {(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}</p>
       </div>
 
       {/* Session Times */}

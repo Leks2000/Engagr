@@ -1,4 +1,4 @@
-export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate }) {
+export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, language = 'en' }) {
   return (
     <div className="card">
       {/* Header */}
@@ -16,6 +16,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate }) 
       {/* Post Excerpt */}
       <p className="text-xs leading-relaxed mb-3" style={{ color: '#555' }}>
         {item.post_excerpt}
+        {item.post_url && <a href={item.post_url} target="_blank" rel="noreferrer" className="block mt-1 underline">Open post</a>}
       </p>
 
       {/* Generated Comment */}
@@ -24,6 +25,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate }) 
         style={{ background: 'white', border: '1px solid #e5e5e5' }}
       >
         💬 {item.comment}
+        <div className="text-[10px] mt-1" style={{ color: 'var(--color-muted)' }}>Language: {language.toUpperCase()}</div>
       </div>
 
       {/* Scheduled time */}
@@ -41,8 +43,8 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate }) 
         <button className="btn btn-sm" onClick={onEdit} title="Edit">
           ✏️
         </button>
-        <button className="btn btn-sm" onClick={onSkip} title="Skip">
-          ❌
+        <button className="btn btn-sm" onClick={onSkip} title="Decline">
+          ⛔
         </button>
         <button className="btn btn-sm" onClick={onRegenerate} title="Regenerate">
           🔄

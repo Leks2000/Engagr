@@ -7,6 +7,7 @@ export default function Queue({ userId }) {
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
+  const [language, setLanguage] = useState('en')
 
   const loadQueue = useCallback(async () => {
     try {
@@ -86,11 +87,12 @@ export default function Queue({ userId }) {
     <div className="px-5 pt-6 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Queue</h1>
+          <h1 className="text-xl font-bold tracking-tight">📋 Queue Planner</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
             {queue.length} pending comment{queue.length !== 1 ? 's' : ''}
           </p>
         </div>
+        <select className="btn btn-sm" value={language} onChange={e => setLanguage(e.target.value)}><option value='en'>EN</option><option value='ru'>RU</option><option value='es'>ES</option></select>
         <button className="btn btn-sm" onClick={loadQueue}>
           ↻ Refresh
         </button>
@@ -151,6 +153,7 @@ export default function Queue({ userId }) {
                   onApprove={() => handleApprove(item.id)}
                   onEdit={() => handleEdit(item)}
                   onSkip={() => handleSkip(item.id)}
+                  language={language}
                   onRegenerate={() => handleRegenerate(item.id)}
                 />
               )}
