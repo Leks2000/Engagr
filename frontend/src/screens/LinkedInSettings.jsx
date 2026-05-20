@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
+import { api, userId } from '../App'
 import Toggle from '../components/Toggle'
 import TagInput from '../components/TagInput'
 import Slider from '../components/Slider'
 
-export default function LinkedInSettings({ userId, settings, onSettingsUpdate }) {
+export default function LinkedInSettings({ userId: propUserId, settings, onSettingsUpdate }) {
   const li = settings?.linkedin || {}
+  const uid = propUserId || userId
 
   const [keywords, setKeywords] = useState(li.keywords || [])
   const [commentsPerDay, setCommentsPerDay] = useState(li.comments_per_day || 5)
@@ -15,6 +17,13 @@ export default function LinkedInSettings({ userId, settings, onSettingsUpdate })
   const [sessionTimes, setSessionTimes] = useState(li.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
   const [dirty, setDirty] = useState(false)
+
+  // Login form
+  const [liEmail, setLiEmail] = useState('')
+  const [liPassword, setLiPassword] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [loginError, setLoginError] = useState('')
 
   const save = () => {
     onSettingsUpdate({
@@ -32,6 +41,58 @@ export default function LinkedInSettings({ userId, settings, onSettingsUpdate })
   }
 
   const markDirty = () => setDirty(true)
+
+  const handleConnect = async () => {
+    if (!liEmail || !liPassword) {
+      setLoginError('Enter email and password')
+      return
+    }
+    setConnecting(true)
+    setLoginError('')
+    try {
+      const res = await api.post('/api/linkedin/login', {
+        user_id: uid,
+        email: liEmail,
+        password: liPassword,
+      })
+      if (res.connected) {
+        setLiPassword('')
+        onSettingsUpdate({
+          linkedin: {
+            ...li,
+            connected: true,
+          },
+        })
+      }
+    } catch (e) {
+      try {
+        const resp = await fetch('/api/linkedin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: uid, email: liEmail, password: liPassword }),
+        })
+        const data = await resp.json()
+        setLoginError(data.error || 'Login failed')
+      } catch {
+        setLoginError(e.message || 'Login failed')
+      }
+    }
+    setConnecting(false)
+  }
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true)
+    try {
+      await api.post(`/api/linkedin/disconnect/${uid}`)
+      onSettingsUpdate({
+        linkedin: {
+          ...li,
+          connected: false,
+        },
+      })
+    } catch (e) {}
+    setDisconnecting(false)
+  }
 
   const addSessionTime = () => {
     if (newTime && sessionTimes.length < 3 && !sessionTimes.includes(newTime)) {
@@ -63,6 +124,90 @@ export default function LinkedInSettings({ userId, settings, onSettingsUpdate })
           </span>
         )}
       </div>
+
+      {/* Account Section */}
+      <Section title="Account" subtitle={li.connected ? 'Session active' : 'Connect your LinkedIn account'}>
+        {li.connected ? (
+          <div className="card flex items-center justify-between py-3">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                <rect x="2" y="9" width="4" height="12" />
+                <circle cx="4" cy="4" r="2" />
+              </svg>
+              <span className="text-sm font-medium">LinkedIn Connected</span>
+            </div>
+            <button
+              className="text-xs px-3 py-1.5 rounded-lg"
+              style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
+              onClick={handleDisconnect}
+              disabled={disconnecting}
+            >
+              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+            </button>
+          </div>
+        ) : (
+          <div className="card">
+            <div className="flex items-start gap-3 mb-4">
+              <span className="text-xl">🔒</span>
+              <div>
+                <p className="font-medium text-sm mb-1">Secure login</p>
+                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                  Your password is used once to create a session. Only cookies are saved.
+                </p>
+              </div>
+            </div>
+            <input
+              type="email"
+              className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
+              placeholder="LinkedIn email"
+              value={liEmail}
+              onChange={e => setLiEmail(e.target.value)}
+              style={{ borderColor: '#ddd' }}
+              autoComplete="email"
+            />
+            <input
+              type="password"
+              className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
+              placeholder="Password"
+              value={liPassword}
+              onChange={e => setLiPassword(e.target.value)}
+              style={{ borderColor: '#ddd' }}
+              autoComplete="current-password"
+              onKeyDown={e => e.key === 'Enter' && handleConnect()}
+            />
+            {loginError && (
+              <p className="text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
+            )}
+            <button
+              className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
+              style={{
+                background: connecting ? '#ccc' : '#0077B5',
+                color: '#fff',
+                border: 'none',
+              }}
+              onClick={handleConnect}
+              disabled={connecting}
+            >
+              {connecting ? (
+                <>
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Logging in...
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                    <rect x="2" y="9" width="4" height="12" />
+                    <circle cx="4" cy="4" r="2" />
+                  </svg>
+                  Connect LinkedIn
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </Section>
 
       {/* Keywords */}
       <Section title="Keywords" subtitle="Posts matching these keywords will be targeted">

@@ -94,15 +94,15 @@ def approve_item(user_id, item_id):
         item = storage.get_queue_item(user_id, item_id)
         if not item:
             return jsonify({"error": "Item not found"}), 404
-        
+
         storage.update_queue_item(user_id, item_id, {"status": "approved"})
-        
+
         # Schedule posting in background
         asyncio.run_coroutine_threadsafe(
             _post_item_delayed(user_id, item),
             _loop
         )
-        
+
         return jsonify({"status": "approved"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -124,7 +124,7 @@ def edit_item(user_id, item_id):
         new_comment = data.get("comment", "")
         if not new_comment:
             return jsonify({"error": "Comment is required"}), 400
-        
+
         storage.update_queue_item(user_id, item_id, {"comment": new_comment})
         return jsonify({"status": "updated"})
     except Exception as e:
@@ -135,17 +135,17 @@ def edit_item(user_id, item_id):
 def regenerate_item(user_id, item_id):
     try:
         import ai_comment
-        
+
         item = storage.get_queue_item(user_id, item_id)
         if not item:
             return jsonify({"error": "Item not found"}), 404
-        
+
         new_comment = ai_comment.regenerate_comment(
             item.get("post_text", ""),
             item.get("comment", ""),
             item.get("platform", "linkedin"),
         )
-        
+
         storage.update_queue_item(user_id, item_id, {"comment": new_comment})
         return jsonify({"status": "regenerated", "comment": new_comment})
     except Exception as e:
@@ -174,174 +174,108 @@ def resume_session(user_id):
         return jsonify({"error": str(e)}), 500
 
 
-# ── Onboarding / LinkedIn ─────────────────────────────
+# ── LinkedIn Login (credentials from Mini App) ───────
 
-@api.route("/api/onboarding/linkedin/status/<user_id>", methods=["GET"])
-def linkedin_status(user_id):
-    from config import COOKIES_PATH
-    connected = COOKIES_PATH.exists()
-    if connected:
-        storage.update_settings(user_id, {"linkedin": {"connected": True}})
-    return jsonify({"connected": connected})
-
-
-# ── Reddit OAuth ──────────────────────────────────────
-
-import secrets
-import urllib.parse
-import requests as http_requests
-
-# In-memory state store (state -> user_id) for CSRF protection
-_reddit_oauth_states: dict[str, str] = {}
-
-
-@api.route("/api/reddit/auth-url", methods=["POST"])
-def reddit_auth_url():
-    """Generate Reddit OAuth authorization URL."""
-    from config import REDDIT_CLIENT_ID, REDDIT_REDIRECT_URI
+@api.route("/api/linkedin/login", methods=["POST"])
+def linkedin_login():
+    """Login to LinkedIn using email/password via Playwright."""
+    import linkedin
 
     try:
         data = request.get_json()
         user_id = data.get("user_id", "")
+        email = data.get("email", "")
+        password = data.get("password", "")
 
-        if not user_id:
-            return jsonify({"error": "user_id is required"}), 400
+        if not user_id or not email or not password:
+            return jsonify({"error": "user_id, email, and password are required"}), 400
 
-        if not REDDIT_CLIENT_ID or not REDDIT_REDIRECT_URI:
-            return jsonify({"error": "Reddit OAuth not configured on server"}), 500
+        # Run Playwright sync login (blocks this request, ~10s)
+        success, msg = linkedin.login_with_playwright(user_id, email, password)
 
-        # Generate CSRF state token
-        state = secrets.token_urlsafe(32)
-        _reddit_oauth_states[state] = user_id
+        if success:
+            # Mark LinkedIn as connected
+            storage.update_settings(user_id, {"linkedin": {"connected": True}})
+            sched_module.schedule_user_sessions(user_id)
+            return jsonify({"status": "ok", "connected": True})
+        else:
+            return jsonify({"error": msg or "Login failed"}), 400
 
-        params = {
-            "client_id": REDDIT_CLIENT_ID,
-            "response_type": "code",
-            "state": state,
-            "redirect_uri": REDDIT_REDIRECT_URI,
-            "duration": "permanent",
-            "scope": "identity submit read vote",
-        }
+    except Exception as e:
+        logger.error(f"LinkedIn login error: {e}")
+        return jsonify({"error": str(e)}), 500
 
-        auth_url = f"https://www.reddit.com/api/v1/authorize?{urllib.parse.urlencode(params)}"
-        return jsonify({"url": auth_url, "state": state})
 
+@api.route("/api/linkedin/status/<user_id>", methods=["GET"])
+def linkedin_status(user_id):
+    """Check if LinkedIn is connected for a user."""
+    from config import linkedin_cookies_path, COOKIES_PATH
+
+    cookies_path = linkedin_cookies_path(user_id)
+    connected = cookies_path.exists() or COOKIES_PATH.exists()
+
+    if connected:
+        storage.update_settings(user_id, {"linkedin": {"connected": True}})
+
+    return jsonify({"connected": connected})
+
+
+@api.route("/api/linkedin/disconnect/<user_id>", methods=["POST"])
+def linkedin_disconnect(user_id):
+    """Disconnect LinkedIn for a user."""
+    from config import linkedin_cookies_path
+
+    try:
+        cookies_path = linkedin_cookies_path(user_id)
+        if cookies_path.exists():
+            cookies_path.unlink()
+
+        storage.update_settings(user_id, {"linkedin": {"connected": False}})
+        return jsonify({"status": "disconnected"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-@api.route("/api/reddit/callback", methods=["GET"])
-def reddit_callback():
-    """Handle Reddit OAuth callback — exchange code for tokens."""
-    from config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_REDIRECT_URI
+# ── Reddit Login (credentials from Mini App) ─────────
+
+@api.route("/api/reddit/login", methods=["POST"])
+def reddit_login():
+    """Login to Reddit using username/password via Playwright."""
+    import reddit_bot
 
     try:
-        code = request.args.get("code", "")
-        state = request.args.get("state", "")
-        error = request.args.get("error", "")
+        data = request.get_json()
+        user_id = data.get("user_id", "")
+        username = data.get("username", "")
+        password = data.get("password", "")
 
-        if error:
-            return f"""
-            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
-            <h2>❌ Reddit authorization denied</h2>
-            <p>{error}</p>
-            <p>You can close this window.</p>
-            </body></html>
-            """, 400
+        if not user_id or not username or not password:
+            return jsonify({"error": "user_id, username, and password are required"}), 400
 
-        if not code or not state:
-            return jsonify({"error": "Missing code or state"}), 400
+        # Run Playwright sync login (blocks this request, ~10s)
+        success, result = reddit_bot.login_with_playwright(user_id, username, password)
 
-        # Validate state
-        user_id = _reddit_oauth_states.pop(state, None)
-        if not user_id:
-            return jsonify({"error": "Invalid or expired state token"}), 400
-
-        # Exchange code for tokens
-        token_response = http_requests.post(
-            "https://www.reddit.com/api/v1/access_token",
-            auth=(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET),
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": REDDIT_REDIRECT_URI,
-            },
-            headers={"User-Agent": "Engagr:v1.0 (OAuth2)"},
-        )
-
-        token_data = token_response.json()
-
-        if "error" in token_data:
-            logger.error(f"Reddit token exchange failed: {token_data}")
-            return f"""
-            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
-            <h2>❌ Reddit connection failed</h2>
-            <p>{token_data.get('error', 'Unknown error')}</p>
-            <p>You can close this window and try again.</p>
-            </body></html>
-            """, 400
-
-        refresh_token = token_data.get("refresh_token", "")
-        access_token = token_data.get("access_token", "")
-
-        if not refresh_token:
-            return f"""
-            <html><body style="font-family:system-ui;text-align:center;padding:60px;">
-            <h2>❌ No refresh token received</h2>
-            <p>Make sure the app is set to "permanent" duration.</p>
-            </body></html>
-            """, 400
-
-        # Get Reddit username
-        reddit_username = ""
-        try:
-            me_response = http_requests.get(
-                "https://oauth.reddit.com/api/v1/me",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "User-Agent": "Engagr:v1.0 (OAuth2)",
-                },
-            )
-            me_data = me_response.json()
-            reddit_username = me_data.get("name", "")
-        except Exception as e:
-            logger.warning(f"Could not fetch Reddit username: {e}")
-
-        # Save to user settings
-        storage.update_settings(user_id, {
-            "reddit": {
+        if success:
+            # result contains the confirmed username
+            reddit_username = result or username
+            storage.update_settings(user_id, {
+                "reddit": {
+                    "connected": True,
+                    "reddit_username": reddit_username,
+                }
+            })
+            sched_module.schedule_user_sessions(user_id)
+            return jsonify({
+                "status": "ok",
                 "connected": True,
-                "refresh_token": refresh_token,
-                "reddit_username": reddit_username,
-            }
-        })
-
-        sched_module.schedule_user_sessions(user_id)
-
-        logger.info(f"Reddit OAuth connected for user {user_id} as u/{reddit_username}")
-
-        # Success page
-        return f"""
-        <html>
-        <body style="font-family:system-ui;text-align:center;padding:60px;background:#f9fafb;">
-        <div style="background:white;border-radius:16px;padding:40px;max-width:400px;margin:0 auto;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-            <div style="font-size:48px;margin-bottom:16px;">✅</div>
-            <h2 style="margin:0 0 8px;">Reddit Connected!</h2>
-            <p style="color:#666;margin:0 0 16px;">Logged in as <strong>u/{reddit_username}</strong></p>
-            <p style="color:#999;font-size:14px;">You can close this window and return to the app.</p>
-        </div>
-        </body>
-        </html>
-        """
+                "username": reddit_username,
+            })
+        else:
+            return jsonify({"error": result or "Login failed"}), 400
 
     except Exception as e:
-        logger.error(f"Reddit OAuth callback error: {e}")
-        return f"""
-        <html><body style="font-family:system-ui;text-align:center;padding:60px;">
-        <h2>❌ Something went wrong</h2>
-        <p>{str(e)}</p>
-        </body></html>
-        """, 500
+        logger.error(f"Reddit login error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @api.route("/api/reddit/status/<user_id>", methods=["GET"])
@@ -357,12 +291,17 @@ def reddit_status(user_id):
 
 @api.route("/api/reddit/disconnect/<user_id>", methods=["POST"])
 def reddit_disconnect(user_id):
-    """Disconnect Reddit OAuth for a user."""
+    """Disconnect Reddit for a user."""
+    from config import reddit_cookies_path
+
     try:
+        cookies_path = reddit_cookies_path(user_id)
+        if cookies_path.exists():
+            cookies_path.unlink()
+
         storage.update_settings(user_id, {
             "reddit": {
                 "connected": False,
-                "refresh_token": "",
                 "reddit_username": "",
             }
         })
@@ -377,19 +316,19 @@ async def _post_item_delayed(user_id: str, item: dict):
     """Post an approved item after a random delay."""
     import random
     from config import DELAYS
-    
+
     delay = random.uniform(*DELAYS["comment"])
     logger.info(f"Posting item {item['id']} in {int(delay/60)} minutes")
     await asyncio.sleep(delay)
-    
+
     success = False
     platform = item.get("platform", "")
-    
+
     if platform == "linkedin":
         import linkedin
         pw = sched_module._playwright
         if pw and item.get("post_url"):
-            success = await linkedin.post_comment(pw, item["post_url"], item["comment"])
+            success = await linkedin.post_comment(pw, item["post_url"], item["comment"], user_id)
         if success:
             storage.increment_stat(user_id, "linkedin_comments")
     elif platform == "reddit":
@@ -399,9 +338,9 @@ async def _post_item_delayed(user_id: str, item: dict):
             success = reddit_bot.post_comment(user_id, reddit_id, item["comment"])
         if success:
             storage.increment_stat(user_id, "reddit_comments")
-    
+
     storage.remove_from_queue(user_id, item["id"])
-    
+
     # Notify user
     try:
         status_msg = "✅ Comment posted successfully!" if success else "❌ Failed to post comment."
@@ -424,24 +363,24 @@ def run_flask():
 async def main():
     global _loop
     _loop = asyncio.get_event_loop()
-    
+
     logger.info("=" * 50)
     logger.info("  Engagr — Starting up...")
     logger.info("=" * 50)
-    
+
     # Validate config
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not set!")
         sys.exit(1)
-    
+
     # Start Flask API in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info("Flask API started")
-    
+
     # Start scheduler
     sched_module.start_scheduler()
-    
+
     # Initialize Playwright (if available)
     try:
         from playwright.async_api import async_playwright
@@ -450,16 +389,16 @@ async def main():
         logger.info("Playwright initialized")
     except Exception as e:
         logger.warning(f"Playwright not available: {e}")
-    
+
     # Create and run Telegram bot
     bot_app = telegram_bot.create_bot()
-    
+
     logger.info("Telegram bot starting...")
-    
+
     # Initialize the bot
     await bot_app.initialize()
     await bot_app.start()
-    
+
     # Set bot commands
     try:
         await bot_app.bot.set_my_commands([
@@ -474,12 +413,12 @@ async def main():
         ])
     except Exception as e:
         logger.error(f"Error setting bot commands: {e}")
-    
+
     # Start polling
     await bot_app.updater.start_polling(drop_pending_updates=True)
-    
+
     logger.info("✅ Engagr is running!")
-    
+
     # Keep running
     try:
         while True:

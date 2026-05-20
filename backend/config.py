@@ -25,7 +25,8 @@ GROQ_SYSTEM_PROMPT = (
     "no self-promotion, add real value or ask a genuine question."
 )
 
-# ── Reddit (OAuth) ────────────────────────────────────
+# ── Reddit (Cookie-login — no app needed) ────────────
+# OAuth fields kept for backward compatibility but no longer required
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_REDIRECT_URI = os.getenv("REDDIT_REDIRECT_URI", "")
@@ -37,7 +38,17 @@ MINI_APP_URL = os.getenv("MINI_APP_URL", "")
 # ── Paths ─────────────────────────────────────────────
 DATA_DIR = ROOT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
-COOKIES_PATH = DATA_DIR / "cookies.json"
+COOKIES_PATH = DATA_DIR / "cookies.json"  # legacy global path
+
+
+def linkedin_cookies_path(user_id: str) -> Path:
+    """Per-user LinkedIn cookies."""
+    return DATA_DIR / str(user_id) / "linkedin_cookies.json"
+
+
+def reddit_cookies_path(user_id: str) -> Path:
+    """Per-user Reddit cookies."""
+    return DATA_DIR / str(user_id) / "reddit_cookies.json"
 
 # ── Daily Hard Limits (never exceeded) ────────────────
 DAILY_LIMITS = {
@@ -69,10 +80,10 @@ DEFAULT_SETTINGS = {
         "add_people_keywords": [],
         "session_times": ["09:00", "14:00", "19:00"],
     },
+    "onboarding_completed": False,
     "reddit": {
         "connected": False,
         "reddit_username": "",
-        "refresh_token": "",
         "subreddits": [],
         "keywords": [],
         "comments_per_day": 5,

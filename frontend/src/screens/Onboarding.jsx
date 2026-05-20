@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../App'
 
 const LANGUAGES = [
@@ -11,18 +11,21 @@ const LANGUAGES = [
 export default function Onboarding({ userId, onComplete }) {
   const [step, setStep] = useState(0)
   const [language, setLanguage] = useState('en')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [redditConnected, setRedditConnected] = useState(false)
-  const [redditUsername, setRedditUsername] = useState('')
-  const pollRef = useRef(null)
 
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [])
+  // LinkedIn
+  const [liEmail, setLiEmail] = useState('')
+  const [liPassword, setLiPassword] = useState('')
+  const [liLoading, setLiLoading] = useState(false)
+  const [liConnected, setLiConnected] = useState(false)
+  const [liError, setLiError] = useState('')
+
+  // Reddit
+  const [rdUsername, setRdUsername] = useState('')
+  const [rdPassword, setRdPassword] = useState('')
+  const [rdLoading, setRdLoading] = useState(false)
+  const [rdConnected, setRdConnected] = useState(false)
+  const [rdDisplayName, setRdDisplayName] = useState('')
+  const [rdError, setRdError] = useState('')
 
   const handleLanguageSelect = async (lang) => {
     setLanguage(lang)
@@ -32,51 +35,90 @@ export default function Onboarding({ userId, onComplete }) {
     setStep(1)
   }
 
-  const handleRedditOAuth = async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const data = await api.post('/api/reddit/auth-url', { user_id: userId })
-      const authUrl = data.url
-
-      // Open Reddit OAuth in a new window
-      const popup = window.open(authUrl, 'reddit_oauth', 'width=600,height=700')
-
-      // Poll for connection status
-      pollRef.current = setInterval(async () => {
-        try {
-          const status = await api.get(`/api/reddit/status/${userId}`)
-          if (status.connected) {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-            setRedditConnected(true)
-            setRedditUsername(status.username || '')
-            setLoading(false)
-            if (popup && !popup.closed) popup.close()
-          }
-        } catch (e) {}
-      }, 2000)
-
-      // Also stop polling after 5 minutes
-      setTimeout(() => {
-        if (pollRef.current) {
-          clearInterval(pollRef.current)
-          pollRef.current = null
-          setLoading(false)
-        }
-      }, 300000)
-
-    } catch (e) {
-      setError('Failed to start Reddit OAuth. Server may not be configured.')
-      setLoading(false)
+  // ── LinkedIn Login ──
+  const handleLinkedInLogin = async () => {
+    if (!liEmail || !liPassword) {
+      setLiError('Enter email and password')
+      return
     }
+    setLiLoading(true)
+    setLiError('')
+    try {
+      const res = await api.post('/api/linkedin/login', {
+        user_id: userId,
+        email: liEmail,
+        password: liPassword,
+      })
+      if (res.connected) {
+        setLiConnected(true)
+        setLiPassword('') // clear password from memory
+      }
+    } catch (e) {
+      const msg = e.message || 'Login failed'
+      // Try to extract error from API response
+      try {
+        const resp = await fetch('/api/linkedin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, email: liEmail, password: liPassword }),
+        })
+        const data = await resp.json()
+        setLiError(data.error || msg)
+      } catch {
+        setLiError(msg)
+      }
+    }
+    setLiLoading(false)
   }
 
-  const handleSkip = () => {
+  // ── Reddit Login ──
+  const handleRedditLogin = async () => {
+    if (!rdUsername || !rdPassword) {
+      setRdError('Enter username and password')
+      return
+    }
+    setRdLoading(true)
+    setRdError('')
+    try {
+      const res = await api.post('/api/reddit/login', {
+        user_id: userId,
+        username: rdUsername,
+        password: rdPassword,
+      })
+      if (res.connected) {
+        setRdConnected(true)
+        setRdDisplayName(res.username || rdUsername)
+        setRdPassword('') // clear password from memory
+      }
+    } catch (e) {
+      const msg = e.message || 'Login failed'
+      try {
+        const resp = await fetch('/api/reddit/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, username: rdUsername, password: rdPassword }),
+        })
+        const data = await resp.json()
+        setRdError(data.error || msg)
+      } catch {
+        setRdError(msg)
+      }
+    }
+    setRdLoading(false)
+  }
+
+  // ── Finish ──
+  const handleFinish = async () => {
+    try {
+      await api.put(`/api/settings/${userId}`, { onboarding_completed: true })
+    } catch (e) {}
     onComplete()
   }
 
-  const handleFinish = () => {
+  const handleSkip = async () => {
+    try {
+      await api.put(`/api/settings/${userId}`, { onboarding_completed: true })
+    } catch (e) {}
     onComplete()
   }
 
@@ -104,7 +146,7 @@ export default function Onboarding({ userId, onComplete }) {
         ))}
       </div>
 
-      {/* Step 0 — Language */}
+      {/* ── Step 0 — Language ── */}
       {step === 0 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Choose language</h2>
@@ -130,105 +172,192 @@ export default function Onboarding({ userId, onComplete }) {
         </div>
       )}
 
-      {/* Step 1 — LinkedIn */}
+      {/* ── Step 1 — LinkedIn Login ── */}
       {step === 1 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Connect LinkedIn</h2>
           <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
-            LinkedIn uses browser cookies for authentication
+            We'll securely log in and save your session cookies
           </p>
 
-          <div className="card mb-4">
-            <div className="flex items-start gap-3">
-              <span className="text-xl">💻</span>
-              <div>
-                <p className="font-medium text-sm mb-1">Run on your server:</p>
-                <code className="text-xs px-2 py-1 rounded" style={{ background: '#f0f0f0' }}>
-                  python backend/setup.py
-                </code>
-                <p className="text-xs mt-2" style={{ color: 'var(--color-muted)' }}>
-                  Opens a browser window to log in to LinkedIn. Cookies are saved for automated sessions.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3 mt-8">
-            <button className="btn flex-1" onClick={() => setStep(2)}>
-              Continue →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 2 — Reddit OAuth */}
-      {step === 2 && (
-        <div className="flex-1 animate-slide-up">
-          <h2 className="text-lg font-semibold mb-1">Connect Reddit</h2>
-          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
-            Log in to your Reddit account via OAuth
-          </p>
-
-          {redditConnected ? (
+          {liConnected ? (
             <div className="card text-center py-8 mb-4">
               <div className="text-4xl mb-3">✅</div>
-              <p className="font-semibold text-sm mb-1">Reddit Connected!</p>
-              {redditUsername && (
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                  Logged in as <strong>u/{redditUsername}</strong>
-                </p>
-              )}
+              <p className="font-semibold text-sm mb-1">LinkedIn Connected!</p>
+              <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                Session saved. Your credentials are not stored.
+              </p>
             </div>
           ) : (
-            <div className="card mb-4">
-              <div className="flex items-start gap-3">
-                <span className="text-xl">🤖</span>
-                <div>
-                  <p className="font-medium text-sm mb-1">One-click connection</p>
-                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                    Click below to authorize Engagr with your Reddit account. 
-                    No credentials are stored — we use secure OAuth tokens.
-                  </p>
+            <div className="space-y-3 mb-4">
+              <div className="card">
+                <div className="flex items-start gap-3 mb-4">
+                  <span className="text-xl">🔒</span>
+                  <div>
+                    <p className="font-medium text-sm mb-1">Secure login</p>
+                    <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                      Your password is used only once to log in. We save session cookies, not your credentials.
+                    </p>
+                  </div>
                 </div>
+
+                <input
+                  type="email"
+                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
+                  placeholder="LinkedIn email"
+                  value={liEmail}
+                  onChange={e => setLiEmail(e.target.value)}
+                  style={{ borderColor: '#ddd' }}
+                  autoComplete="email"
+                />
+                <input
+                  type="password"
+                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none"
+                  placeholder="Password"
+                  value={liPassword}
+                  onChange={e => setLiPassword(e.target.value)}
+                  style={{ borderColor: '#ddd' }}
+                  autoComplete="current-password"
+                  onKeyDown={e => e.key === 'Enter' && handleLinkedInLogin()}
+                />
               </div>
             </div>
           )}
 
-          {error && (
-            <p className="text-xs mt-3" style={{ color: 'var(--color-danger)' }}>{error}</p>
+          {liError && (
+            <p className="text-xs mt-2 mb-2" style={{ color: 'var(--color-danger)' }}>{liError}</p>
           )}
 
           <div className="flex gap-3 mt-6">
-            {redditConnected ? (
-              <button
-                className="btn flex-1"
-                onClick={handleFinish}
-              >
-                Get Started 🚀
+            {liConnected ? (
+              <button className="btn flex-1" onClick={() => setStep(2)}>
+                Continue →
               </button>
             ) : (
               <button
-                className="btn flex-1"
-                onClick={handleRedditOAuth}
-                disabled={loading}
+                className="btn flex-1 flex items-center justify-center gap-2"
+                onClick={handleLinkedInLogin}
+                disabled={liLoading}
                 style={{
-                  background: loading ? '#ccc' : '#FF4500',
+                  background: liLoading ? '#ccc' : '#0077B5',
                   color: '#fff',
                   border: 'none',
                 }}
               >
-                {loading ? (
-                  <span className="flex items-center justify-center gap-2">
+                {liLoading ? (
+                  <>
                     <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Waiting for authorization...
-                  </span>
+                    Logging in...
+                  </>
                 ) : (
-                  <span className="flex items-center justify-center gap-2">
+                  <>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                      <rect x="2" y="9" width="4" height="12" />
+                      <circle cx="4" cy="4" r="2" />
+                    </svg>
+                    Connect LinkedIn
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+          <button
+            className="w-full mt-3 text-sm py-2"
+            style={{ color: 'var(--color-muted)' }}
+            onClick={() => setStep(2)}
+          >
+            Skip for now
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 2 — Reddit Login ── */}
+      {step === 2 && (
+        <div className="flex-1 animate-slide-up">
+          <h2 className="text-lg font-semibold mb-1">Connect Reddit</h2>
+          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
+            Log in with your Reddit credentials
+          </p>
+
+          {rdConnected ? (
+            <div className="card text-center py-8 mb-4">
+              <div className="text-4xl mb-3">✅</div>
+              <p className="font-semibold text-sm mb-1">Reddit Connected!</p>
+              {rdDisplayName && (
+                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                  Logged in as <strong>u/{rdDisplayName}</strong>
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3 mb-4">
+              <div className="card">
+                <div className="flex items-start gap-3 mb-4">
+                  <span className="text-xl">🔒</span>
+                  <div>
+                    <p className="font-medium text-sm mb-1">Secure login</p>
+                    <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
+                      Your password is used only once to create a session. We save cookies, not your credentials.
+                    </p>
+                  </div>
+                </div>
+
+                <input
+                  type="text"
+                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
+                  placeholder="Reddit username"
+                  value={rdUsername}
+                  onChange={e => setRdUsername(e.target.value)}
+                  style={{ borderColor: '#ddd' }}
+                  autoComplete="username"
+                />
+                <input
+                  type="password"
+                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none"
+                  placeholder="Password"
+                  value={rdPassword}
+                  onChange={e => setRdPassword(e.target.value)}
+                  style={{ borderColor: '#ddd' }}
+                  autoComplete="current-password"
+                  onKeyDown={e => e.key === 'Enter' && handleRedditLogin()}
+                />
+              </div>
+            </div>
+          )}
+
+          {rdError && (
+            <p className="text-xs mt-2 mb-2" style={{ color: 'var(--color-danger)' }}>{rdError}</p>
+          )}
+
+          <div className="flex gap-3 mt-6">
+            {rdConnected ? (
+              <button className="btn flex-1" onClick={handleFinish}>
+                Get Started 🚀
+              </button>
+            ) : (
+              <button
+                className="btn flex-1 flex items-center justify-center gap-2"
+                onClick={handleRedditLogin}
+                disabled={rdLoading}
+                style={{
+                  background: rdLoading ? '#ccc' : '#FF4500',
+                  color: '#fff',
+                  border: 'none',
+                }}
+              >
+                {rdLoading ? (
+                  <>
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  <>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
                       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.8 11.33c.02.16.03.33.03.5 0 2.55-2.97 4.63-6.63 4.63s-6.63-2.07-6.63-4.63c0-.17.01-.34.03-.5A1.45 1.45 0 013.2 12c0-.81.66-1.47 1.47-1.47.39 0 .74.15 1.01.41 1-.72 2.37-1.18 3.9-1.24l.66-3.12.04-.02 2.15.45c.13-.27.4-.46.72-.46a.82.82 0 01.82.82.82.82 0 01-.82.82.82.82 0 01-.73-.45l-1.93-.41-.59 2.79c1.5.07 2.85.53 3.83 1.24.27-.25.62-.41 1.01-.41.81 0 1.47.66 1.47 1.47 0 .56-.31 1.04-.76 1.29z" />
                     </svg>
-                    Connect via Reddit
-                  </span>
+                    Connect Reddit
+                  </>
                 )}
               </button>
             )}
@@ -238,7 +367,7 @@ export default function Onboarding({ userId, onComplete }) {
             style={{ color: 'var(--color-muted)' }}
             onClick={handleSkip}
           >
-            Skip for now
+            {rdConnected ? 'Continue' : 'Skip for now'}
           </button>
         </div>
       )}

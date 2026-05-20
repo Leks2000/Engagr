@@ -12,7 +12,7 @@ const tg = window.Telegram?.WebApp
 const userId = tg?.initDataUnsafe?.user?.id?.toString() || 'dev_user'
 
 // ── API helpers ──────────────────────────────────────
-const API_BASE = import.meta.env.PROD ? '' : ''
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 export const api = {
   async get(path) {
@@ -66,14 +66,11 @@ function App() {
       const data = await api.get(`/api/settings/${userId}`)
       setSettings(data)
       
-      // Check if onboarding is needed
-      const hasLinkedIn = data?.linkedin?.connected
-      const hasReddit = data?.reddit?.connected
-      
-      if (!hasLinkedIn && !hasReddit) {
-        setScreen('onboarding')
-      } else {
+      // Check if onboarding was completed
+      if (data?.onboarding_completed) {
         setScreen('dashboard')
+      } else {
+        setScreen('onboarding')
       }
     } catch (err) {
       console.error('Failed to load settings:', err)

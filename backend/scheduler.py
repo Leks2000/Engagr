@@ -127,16 +127,16 @@ async def run_linkedin_session(user_id: str):
     
     try:
         # Check login
-        if _playwright and not await linkedin.check_login(_playwright):
+        if _playwright and not await linkedin.check_login(_playwright, user_id):
             if _send_queue_item:
                 await _send_queue_item(user_id, {
                     "type": "error",
-                    "message": "⚠️ LinkedIn cookies expired. Please run setup.py to re-login."
+                    "message": "⚠️ LinkedIn cookies expired. Please re-login through the app."
                 })
             return
         
         # Scrape posts
-        posts = await linkedin.scrape_posts(_playwright, keywords) if _playwright else []
+        posts = await linkedin.scrape_posts(_playwright, keywords, user_id=user_id) if _playwright else []
         
         # Calculate how many comments we can still post today
         remaining_comments = min(
@@ -184,7 +184,7 @@ async def run_linkedin_session(user_id: str):
         for post in posts[:remaining_likes]:
             if post.get("url") and _playwright:
                 try:
-                    success = await linkedin.like_post(_playwright, post["url"])
+                    success = await linkedin.like_post(_playwright, post["url"], user_id=user_id)
                     if success:
                         storage.increment_stat(user_id, "linkedin_likes")
                     await asyncio.sleep(random.uniform(*DELAYS["like"]))
