@@ -149,12 +149,10 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         ) : (
           <div className="card">
             <div className="flex items-start gap-3 mb-4">
-              <span className="text-xl">🔒</span>
+              <span aria-hidden="true" style={{ color: '#0A66C2' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
               <div>
                 <p className="font-medium text-sm mb-1">Secure login</p>
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                  Your password is used once to create a session. Only cookies are saved.
-                </p>
+                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Your password is used once to create a session. Only cookies are saved.</p>
               </div>
             </div>
             <input
