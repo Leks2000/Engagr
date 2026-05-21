@@ -215,13 +215,13 @@ def linkedin_login():
 def linkedin_status(user_id):
     """Check if LinkedIn is connected for a user."""
     from config import linkedin_cookies_path, COOKIES_PATH
+    import linkedin
 
     cookies_path = linkedin_cookies_path(user_id)
-    connected = cookies_path.exists() or COOKIES_PATH.exists()
+    auth = linkedin._load_auth(user_id)
+    connected = cookies_path.exists() or COOKIES_PATH.exists() or bool(auth.get("access_token"))
 
-    if connected:
-        storage.update_settings(user_id, {"linkedin": {"connected": True}})
-
+    storage.update_settings(user_id, {"linkedin": {"connected": connected}})
     return jsonify({"connected": connected})
 
 

@@ -48,18 +48,6 @@ def verify_li_at(user_id: str, li_at: str) -> bool:
 
 
 def _extract_activity_urn(post_url: str) -> str | None:
-    m = re.search(r"activity:(\d{8,})", post_url)
-    if m:
-        return m.group(1)
-    m = re.search(r"/(?:feed/update|posts)/[^\s]*?(\d{8,})", post_url)
-    return m.group(1) if m else None
-
-
-def _post_url_from_urn(activity_urn: str) -> str:
-    return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_urn}/"
-
-
-def _extract_activity_urn(post_url: str) -> str | None:
     m = re.search(r"/(?:feed/update|posts)/[^\s]*?(\d{8,})", post_url)
     if m:
         return m.group(1)
@@ -104,6 +92,13 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
     auth = _load_auth(uid)
     if auth.get("li_at"):
         return verify_li_at(uid, auth["li_at"])
+    if auth.get("access_token"):
+        headers = {"Authorization": f"Bearer {auth['access_token']}"}
+        try:
+            resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
+            return resp.status_code == 200
+        except Exception:
+            return False
     return False
 
 
