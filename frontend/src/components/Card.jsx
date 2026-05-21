@@ -1,52 +1,123 @@
-export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, language = 'en' }) {
+export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, onSelectVariant, language = 'en' }) {
+  const isLinkedIn = item.platform === 'linkedin'
+  const platformColor = isLinkedIn ? '#0A66C2' : '#FF4500'
+
+  // Get initials for avatar fallback
+  const authorName = item.author_name || item.author || ''
+  const initials = authorName
+    .split(' ')
+    .map(w => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || '?'
+
+  const variants = item.comment_variants || []
+  const selectedComment = item.selected_comment || item.comment || ''
+
+  const handleOpenPost = () => {
+    const url = item.post_url
+    if (!url) return
+    if (window.Telegram?.WebApp?.openLink) {
+      window.Telegram.WebApp.openLink(url)
+    } else {
+      window.open(url, '_blank')
+    }
+  }
+
   return (
-    <div className="card">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+    <div className="queue-card" style={{ borderLeft: `3px solid ${platformColor}` }}>
+      {/* Header: Platform + Author */}
+      <div className="queue-card-header">
+        <div className="queue-card-author">
+          <div className="queue-card-avatar" style={{ background: platformColor }}>
+            {initials}
+          </div>
+          <div>
+            <span className="queue-card-name">{authorName || 'Unknown'}</span>
+            {item.reactions_count > 0 && (
+              <span className="queue-card-reactions">
+                👍 {item.reactions_count}
+              </span>
+            )}
+          </div>
+        </div>
         <span className={`badge badge-${item.platform}`}>
-          {item.platform}
+          {isLinkedIn ? 'LinkedIn' : 'Reddit'}
         </span>
-        {item.author && (
-          <span className="text-xs" style={{ color: 'var(--color-muted)' }}>
-            by {item.author}
-          </span>
-        )}
       </div>
 
       {/* Post Excerpt */}
-      <p className="text-xs leading-relaxed mb-3" style={{ color: '#555' }}>
-        {item.post_excerpt}
-        {item.post_url && <a href={item.post_url} target="_blank" rel="noreferrer" className="block mt-1 underline">Open post</a>}
-      </p>
-
-      {/* Generated Comment */}
-      <div
-        className="px-3 py-2.5 rounded-lg mb-3 text-sm"
-        style={{ background: 'white', border: '1px solid #e5e5e5' }}
-      >
-        💬 {item.comment}
-        <div className="text-[10px] mt-1" style={{ color: 'var(--color-muted)' }}>Language: {language.toUpperCase()}</div>
+      <div className="queue-card-excerpt">
+        <p>{item.post_excerpt || item.excerpt || ''}</p>
       </div>
 
-      {/* Scheduled time */}
-      {item.created_at && (
-        <p className="text-[10px] mb-3" style={{ color: 'var(--color-muted)' }}>
-          Created: {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </p>
+      {/* View Post Link */}
+      {item.post_url && (
+        <button className="queue-card-link" onClick={handleOpenPost}>
+          View post →
+        </button>
+      )}
+
+      {/* Comment Variants */}
+      {variants.length > 0 ? (
+        <div className="queue-card-variants">
+          <div className="queue-card-variants-label">
+            <span>AI Comment Variants</span>
+            {item.post_language && item.user_language && item.post_language !== item.user_language && (
+              <span className="queue-card-lang-badge">
+                {item.post_language.toUpperCase()} → {item.user_language.toUpperCase()}
+              </span>
+            )}
+          </div>
+          {variants.map((variant, idx) => (
+            <label
+              key={idx}
+              className={`queue-card-variant ${selectedComment === variant ? 'selected' : ''}`}
+              onClick={() => onSelectVariant && onSelectVariant(item.id, idx)}
+            >
+              <input
+                type="radio"
+                name={`variant-${item.id}`}
+                checked={selectedComment === variant}
+                onChange={() => onSelectVariant && onSelectVariant(item.id, idx)}
+              />
+              <span className="queue-card-variant-text">{variant}</span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="queue-card-comment">
+          <span className="queue-card-comment-icon">💬</span>
+          <span>{selectedComment}</span>
+        </div>
+      )}
+
+      {/* Language Badge */}
+      {item.post_language && (
+        <div className="queue-card-meta">
+          <span className="queue-card-lang">
+            Post: {item.post_language.toUpperCase()}
+          </span>
+          {item.user_language && item.post_language !== item.user_language && (
+            <span className="queue-card-lang">
+              You: {item.user_language.toUpperCase()}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Action Buttons */}
-      <div className="grid grid-cols-4 gap-2">
-        <button className="btn btn-sm" onClick={onApprove} title="Post">
-          ✅
+      <div className="queue-card-actions">
+        <button className="queue-btn queue-btn-approve" onClick={onApprove} title="Post comment">
+          ✅ Post
         </button>
-        <button className="btn btn-sm" onClick={onEdit} title="Edit">
-          ✏️
+        <button className="queue-btn queue-btn-edit" onClick={onEdit} title="Edit comment">
+          ✏️ Edit
         </button>
-        <button className="btn btn-sm" onClick={onSkip} title="Decline">
-          ⛔
+        <button className="queue-btn queue-btn-skip" onClick={onSkip} title="Skip this post">
+          ❌ Skip
         </button>
-        <button className="btn btn-sm" onClick={onRegenerate} title="Regenerate">
+        <button className="queue-btn queue-btn-regen" onClick={onRegenerate} title="Regenerate">
           🔄
         </button>
       </div>

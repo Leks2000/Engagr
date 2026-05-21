@@ -196,6 +196,11 @@ async def add_connection(_playwright_unused, user_id: str, keywords: list[str]):
 
 
 def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -> list[dict]:
+    """Scrape posts using OAuth token.
+    
+    Fetches from LinkedIn API, filters by keywords, excludes posts with < 3 reactions.
+    Returns list of {id, text, excerpt, url, author_name, reactions_count, platform}.
+    """
     auth = _load_auth(user_id)
     token = auth.get("access_token")
     if not token:
@@ -205,6 +210,10 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
     }
+
+    all_items = []
+
+    # Fetch user's feed posts (ugcPosts)
     try:
         resp = requests.get(
             "https://api.linkedin.com/v2/ugcPosts",
@@ -212,31 +221,94 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
             params={"q": "authors", "count": 50},
             timeout=20,
         )
-        if resp.status_code != 200:
-            return []
-    except Exception:
-        return []
+        if resp.status_code == 200:
+            all_items.extend(resp.json().get("elements", []))
+    except Exception as e:
+        logger.error("LinkedIn ugcPosts fetch failed user=%s: %s", user_id, e)
+
+    # Also try fetching feed/shares for broader content
+    try:
+        resp2 = requests.get(
+            "https://api.linkedin.com/v2/shares",
+            headers=headers,
+            params={"q": "owners", "count": 20},
+            timeout=20,
+        )
+        if resp2.status_code == 200:
+            all_items.extend(resp2.json().get("elements", []))
+    except Exception as e:
+        logger.debug("LinkedIn shares fetch failed (non-critical): %s", e)
 
     posts = []
-    for item in resp.json().get("elements", []):
+    seen_ids = set()
+
+    for item in all_items:
+        # Extract text from UGC format
         text = (
             item.get("specificContent", {})
             .get("com.linkedin.ugc.ShareContent", {})
             .get("shareCommentary", {})
             .get("text", "")
         )
+        # Fallback to share format
+        if not text:
+            text = item.get("text", {}).get("text", "") if isinstance(item.get("text"), dict) else ""
+
         if not text:
             continue
+
+        # Filter by keywords
         if keywords and not any(k.lower() in text.lower() for k in keywords):
             continue
+
         post_id = item.get("id", "")
+        if post_id in seen_ids:
+            continue
+        seen_ids.add(post_id)
+
+        # Extract author info
+        author_name = ""
+        author_urn = item.get("author", "")
+        if author_urn:
+            # Try to get the name from the profile
+            try:
+                profile_resp = requests.get(
+                    f"https://api.linkedin.com/v2/people/{author_urn.split(':')[-1]}",
+                    headers=headers,
+                    timeout=10,
+                )
+                if profile_resp.status_code == 200:
+                    pdata = profile_resp.json()
+                    first = pdata.get("localizedFirstName", "")
+                    last = pdata.get("localizedLastName", "")
+                    author_name = f"{first} {last}".strip()
+            except Exception:
+                pass
+
+        # Extract reactions count
+        reactions_count = 0
+        social_detail = item.get("socialDetail", {})
+        if social_detail:
+            reactions_count = social_detail.get("totalSocialActivityCounts", {}).get("numLikes", 0)
+
+        # Filter out posts with less than 3 reactions (skip for now if we can't get count)
+        # Only filter if we actually got social data
+        if social_detail and reactions_count < 3:
+            continue
+
         posts.append({
             "id": post_id,
             "text": text[:1000],
             "excerpt": text[:200],
             "url": f"https://www.linkedin.com/feed/update/{post_id}",
+            "author_name": author_name,
+            "reactions_count": reactions_count,
             "platform": "linkedin",
         })
+
+        if len(posts) >= max_posts:
+            break
+
     return posts[:max_posts]
 
 

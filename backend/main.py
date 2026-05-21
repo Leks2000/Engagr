@@ -128,8 +128,35 @@ def edit_item(user_id, item_id):
         if not new_comment:
             return jsonify({"error": "Comment is required"}), 400
 
-        storage.update_queue_item(user_id, item_id, {"comment": new_comment})
+        storage.update_queue_item(user_id, item_id, {
+            "comment": new_comment,
+            "selected_comment": new_comment,
+        })
         return jsonify({"status": "updated"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/queue/<user_id>/<item_id>/select", methods=["POST"])
+def select_variant(user_id, item_id):
+    """Select a specific comment variant."""
+    try:
+        data = request.get_json()
+        variant_index = data.get("variant_index", 0)
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+
+        variants = item.get("comment_variants", [])
+        if variant_index < 0 or variant_index >= len(variants):
+            return jsonify({"error": "Invalid variant index"}), 400
+
+        selected = variants[variant_index]
+        storage.update_queue_item(user_id, item_id, {
+            "comment": selected,
+            "selected_comment": selected,
+        })
+        return jsonify({"status": "selected", "comment": selected})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -324,6 +351,7 @@ def linkedin_auth(user_id):
 @api.route("/api/linkedin/callback", methods=["GET"])
 def linkedin_callback():
     import linkedin
+    from flask import redirect as flask_redirect
     from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, MINI_APP_URL
     code = request.args.get("code", "")
     user_id = request.args.get("state", "")
@@ -337,10 +365,8 @@ def linkedin_callback():
             return jsonify({"error": "token_exchange_failed", "details": data}), 400
         linkedin._save_auth(user_id, {"auth_method": "oauth2", "access_token": token, "raw": data})
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
-        if MINI_APP_URL:
-            from flask import redirect
-            return redirect(f"{MINI_APP_URL}?linkedin=connected&user_id={user_id}")
-        return jsonify({"status": "ok", "connected": True})
+        # Redirect back to Telegram via deep link so user returns to bot
+        return flask_redirect(f"tg://resolve?domain=Engagr_bot&start=linkedin_connected_{user_id}")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -452,16 +478,26 @@ def run_session_now(user_id):
         li_cfg = settings.get("linkedin", {})
         keywords = li_cfg.get("keywords", []) or []
         max_posts = li_cfg.get("comments_per_day", 5)
+        user_language = settings.get("language", "en")
 
         posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         queued = 0
         now = datetime.now(timezone.utc).isoformat()
+        result_posts = []
 
         for post in posts:
             post_text = post.get("text", "")
             if not post_text:
                 continue
-            comment = ai_comment.generate_comment(post_text, "linkedin")
+
+            # Generate 3 comment variants with language detection
+            comment_data = ai_comment.generate_comment_variants(
+                post_text, user_language, "linkedin"
+            )
+            variants = comment_data.get("variants", [])
+            if not variants:
+                continue
+
             item_id = f"li_{post.get('id', queued)}_{queued}"
             storage.add_to_queue(user_id, {
                 "id": item_id,
@@ -469,14 +505,25 @@ def run_session_now(user_id):
                 "post_id": post.get("id", ""),
                 "post_url": post.get("url", ""),
                 "post_text": post_text,
-                "excerpt": post.get("excerpt", ""),
-                "comment": comment,
+                "post_excerpt": post.get("excerpt", ""),
+                "author_name": post.get("author_name", ""),
+                "reactions_count": post.get("reactions_count", 0),
+                "comment_variants": variants,
+                "selected_comment": variants[0] if variants else "",
+                "comment": variants[0] if variants else "",
+                "user_language": user_language,
+                "post_language": comment_data.get("post_language", "en"),
                 "status": "pending",
                 "created_at": now,
             })
             queued += 1
+            result_posts.append({
+                "url": post.get("url", ""),
+                "excerpt": post.get("excerpt", ""),
+                "author": post.get("author_name", ""),
+            })
 
-        return jsonify({"queued": queued})
+        return jsonify({"queued": queued, "posts": result_posts})
     except Exception as e:
         logger.error("manual session run failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500

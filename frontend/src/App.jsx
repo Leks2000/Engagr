@@ -110,7 +110,7 @@ function App() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
-            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
             {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} /></div>}

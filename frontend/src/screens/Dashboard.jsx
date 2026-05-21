@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../App'
 
-export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
+export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
+  const [running, setRunning] = useState(false)
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
@@ -18,16 +19,23 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
     try { await api.post(`/api/session/${uid}/${isActive ? 'pause' : 'resume'}`); onSettingsUpdate({ session_active: !isActive }) } catch (err) { console.error('Failed to toggle session:', err) }
   }
 
-  const runTestSession = async () => {
+  const runSession = async () => {
+    setRunning(true)
     try {
       const res = await api.post(`/api/session/run/${uid}`)
-      const msg = `Queued ${res?.queued || 0} comments — check Queue tab`
+      const count = res?.queued || 0
+      const msg = `✅ Added ${count} posts to queue`
       setToast(msg)
-      setTimeout(() => setToast(''), 3000)
+      setTimeout(() => setToast(''), 4000)
+      // Navigate to Queue tab after short delay
+      if (count > 0 && onNavigate) {
+        setTimeout(() => onNavigate('queue'), 1500)
+      }
     } catch (err) {
-      setToast('Failed to run test session')
+      setToast('❌ Failed to run session')
       setTimeout(() => setToast(''), 3000)
     }
+    setRunning(false)
   }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading stats...</div></div>
@@ -37,13 +45,23 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
       <div className="flex items-center justify-between mb-6">
         <div><h1 className="text-xl font-bold tracking-tight">Dashboard</h1><p className="text-xs" style={{ color: 'var(--color-muted)' }}>Today · Engagement performance</p></div>
         <div className="flex gap-2">
-          <button className="btn btn-sm" onClick={runTestSession}>Run Test Session</button>
+          <button
+            className="btn btn-sm btn-run-session"
+            onClick={runSession}
+            disabled={running}
+          >
+            {running ? (
+              <><span className="spinner-sm" /> Running...</>
+            ) : (
+              '▶ Run Session'
+            )}
+          </button>
           <button className="btn btn-sm" onClick={toggleSession}><span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>{isActive ? 'Active' : 'Paused'}</button>
         </div>
       </div>
 
       {toast && (
-        <div className="card mb-4 text-sm" style={{ background: "#e8f5e9", color: "#1b5e20" }}>{toast}</div>
+        <div className="card mb-4 text-sm toast-msg" style={{ background: toast.includes('❌') ? '#ffeaea' : '#e8f5e9', color: toast.includes('❌') ? '#c62828' : '#1b5e20' }}>{toast}</div>
       )}
 
       <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">

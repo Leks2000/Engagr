@@ -34,6 +34,30 @@ _edit_mode: dict[str, str] = {}  # user_id -> queue_item_id
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     
+    # Handle deep link payload from LinkedIn OAuth redirect
+    if context.args and context.args[0].startswith("linkedin_connected_"):
+        payload_user_id = context.args[0].replace("linkedin_connected_", "")
+        # Verify user matches or update settings for the payload user
+        target_user = payload_user_id if payload_user_id else user_id
+        storage.update_settings(target_user, {"linkedin": {"connected": True}})
+        
+        await update.message.reply_text(
+            "✅ *LinkedIn connected successfully!*\n\n"
+            "Your account is linked. Open the Mini App to start engaging.",
+            parse_mode="Markdown",
+        )
+        
+        # Send inline button to open Mini App
+        if MINI_APP_URL:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Open Engagr", web_app=WebAppInfo(url=MINI_APP_URL))]
+            ])
+            await update.message.reply_text(
+                "Tap below to return to the app:",
+                reply_markup=keyboard,
+            )
+        return
+    
     # Initialize user data
     storage.get_settings(user_id)
     storage.get_stats(user_id)
