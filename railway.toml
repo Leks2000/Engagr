@@ -1,6 +1,11 @@
 [build]
-builder = "nixpacks"
-buildCommand = "cd backend && pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium"
+builder = "dockerfile"
+
+[deploy]
+startCommand = "cd backend && python main.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "always"
 
 [deploy]
 startCommand = "cd backend && python main.py"
