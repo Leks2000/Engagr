@@ -15,9 +15,7 @@ const urlParams = new URLSearchParams(window.location.search)
 const userIdFromQuery = urlParams.get('user_id')
 const userIdFromStorage = window.localStorage.getItem('engagr_user_id')
 const userId = tg?.initDataUnsafe?.user?.id?.toString() || userIdFromQuery || userIdFromStorage || 'dev_user'
-if (userId && userId !== 'dev_user') {
-  window.localStorage.setItem('engagr_user_id', userId)
-}
+window.localStorage.setItem('engagr_user_id', userId)
 const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
 export const api = {
@@ -76,10 +74,6 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (webAppReady) loadSettings()
-  }, [webAppReady, loadSettings])
-
   const handleSettingsUpdate = useCallback(async (updates) => {
     try {
       await api.put(`/api/settings/${userId}`, updates)
@@ -89,8 +83,21 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (webAppReady) loadSettings()
+  }, [webAppReady])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      window.history.replaceState({}, '', '/')
+      loadSettings().then(() => setScreen('linkedin'))
+    }
+  }, [])
+
+
   if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
-  if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={loadSettings} onOpenReddit={() => setScreen('reddit')} />
+  if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={loadSettings} />
 
   return (
     <div className="flex flex-col min-h-screen app-shell">
