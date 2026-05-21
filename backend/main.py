@@ -338,8 +338,7 @@ def linkedin_callback():
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
         if MINI_APP_URL:
             from flask import redirect
-            sep = "&" if "?" in MINI_APP_URL else "?"
-            return redirect(f"{MINI_APP_URL}{sep}linkedin=connected")
+            return redirect(f"{MINI_APP_URL}?linkedin=connected&user_id={user_id}")
         return jsonify({"status": "ok", "connected": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
