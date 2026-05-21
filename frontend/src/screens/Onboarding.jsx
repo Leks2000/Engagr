@@ -11,6 +11,7 @@ const LANGUAGES = [
 export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [step, setStep] = useState(0)
   const [language, setLanguage] = useState('en')
+  const [authUrl, setAuthUrl] = useState('')
 
   const [liLoading, setLiLoading] = useState(false)
   const [liConnected, setLiConnected] = useState(false)
@@ -34,10 +35,16 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     const checkConnections = async () => {
       try {
         const data = await api.get(`/api/settings/${userId}`)
+        const lang = data?.language || 'en'
+        setLanguage(lang)
         const linkedinConnected = !!data?.linkedin?.connected
         const redditConnected = !!data?.reddit?.connected
         setLiConnected(linkedinConnected)
         setRdConnected(redditConnected)
+        if (!data?.language) {
+          setStep(0)
+          return
+        }
         if (linkedinConnected && !redditConnected) setStep(2)
         if (!linkedinConnected) setStep(1)
       } catch (e) {}
@@ -59,11 +66,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     setLiError('')
     try {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
-      if (window.Telegram?.WebApp?.openLink) {
-        window.Telegram.WebApp.openLink(res.url)
-      } else {
-        window.location.href = res.url
-      }
+      setAuthUrl(res.url)
     } catch (e) {
       setLiError(e.message || 'Failed to start LinkedIn OAuth')
     }
@@ -100,8 +103,34 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
 
   const canFinishNow = liConnected && rdConnected
 
+  useEffect(() => {
+    if (!authUrl) return
+    const poll = setInterval(async () => {
+      try {
+        const st = await api.get(`/api/linkedin/check/${userId}`)
+        if (st.connected) {
+          setLiConnected(true)
+          setAuthUrl('')
+          setStep(2)
+        }
+      } catch {}
+    }, 2000)
+    return () => clearInterval(poll)
+  }, [authUrl, userId])
+
   return (
     <div className="min-h-screen flex flex-col px-6 py-8">
+      {authUrl && (
+        <div className="oauth-modal-backdrop">
+          <div className="oauth-modal animate-slide-up">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold">LinkedIn authorization</p>
+              <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
+            </div>
+            <iframe title="LinkedIn OAuth" src={authUrl} className="oauth-frame" />
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="text-center mb-8 animate-fade-in">
         <h1 className="text-3xl font-bold tracking-tight mb-1">Engagr</h1>

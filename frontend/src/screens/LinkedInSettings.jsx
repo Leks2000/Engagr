@@ -32,6 +32,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
+  const [authUrl, setAuthUrl] = useState('')
 
   const save = () => {
     onSettingsUpdate({
@@ -55,11 +56,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     setLoginError('')
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
-      if (window.Telegram?.WebApp?.openLink) {
-        window.Telegram.WebApp.openLink(res.url)
-      } else {
-        window.location.href = res.url
-      }
+      setAuthUrl(res.url)
       
       // Поллим статус каждые 2 сек пока не подключится
       const poll = setInterval(async () => {
@@ -68,6 +65,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           if (st.connected) {
             clearInterval(poll)
             setStatus(true)
+            setAuthUrl('')
             setConnecting(false)
             onSettingsUpdate({ linkedin: { ...li, connected: true } })
           }
@@ -183,6 +181,17 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
+      {authUrl && (
+        <div className="oauth-modal-backdrop">
+          <div className="oauth-modal animate-slide-up">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold">LinkedIn authorization</p>
+              <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
+            </div>
+            <iframe title="LinkedIn OAuth" src={authUrl} className="oauth-frame" />
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
