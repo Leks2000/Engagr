@@ -12,7 +12,7 @@ import Queue from './screens/Queue'
 
 const tg = window.Telegram?.WebApp
 const userId = tg?.initDataUnsafe?.user?.id?.toString() || 'dev_user'
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
 export const api = {
   async get(path) {
