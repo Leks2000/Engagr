@@ -38,9 +38,8 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
         const redditConnected = !!data?.reddit?.connected
         setLiConnected(linkedinConnected)
         setRdConnected(redditConnected)
-        if (linkedinConnected && !redditConnected) {
-          setStep(2)
-        }
+        if (linkedinConnected && !redditConnected) setStep(2)
+        if (!linkedinConnected) setStep(1)
       } catch (e) {}
     }
     checkConnections()
@@ -72,6 +71,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     setRdLoading(true)
     setRdError('')
     try {
+      await api.put(`/api/settings/${userId}`, { onboarding_completed: true })
       onOpenReddit?.()
     } catch (e) {
       setRdError(e.message || 'Failed to open Reddit settings')
