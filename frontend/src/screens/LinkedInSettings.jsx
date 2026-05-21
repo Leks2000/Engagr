@@ -16,16 +16,32 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [addKeywords, setAddKeywords] = useState(li.add_people_keywords || [])
   const [sessionTimes, setSessionTimes] = useState(li.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+  
+  // Login form
+  const [liAt, setLiAt] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
-  const [profile, setProfile] = useState(null)
-  const [profileLoading, setProfileLoading] = useState(false)
-  const [saveState, setSaveState] = useState('idle')
-  const [showSaved, setShowSaved] = useState(false)
-  const saveTimerRef = useRef(null)
-  const savedToastTimerRef = useRef(null)
-  const isConnected = !!settings?.linkedin?.connected
+  const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
+
+  const save = () => {
+    onSettingsUpdate({
+      linkedin: {
+        ...li,
+        keywords,
+        comments_per_day: commentsPerDay,
+        people_add_range: addRange,
+        add_people_by_keywords: addByKeywords,
+        add_people_keywords: addKeywords,
+        session_times: sessionTimes,
+      },
+    })
+    setDirty(false)
+  }
+
+  const markDirty = () => setDirty(true)
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -33,51 +49,55 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       window.location.href = res.url
-    } catch (e) { setLoginError(e.message || 'Failed to start OAuth') }
+      
+      // Поллим статус каждые 2 сек пока не подключится
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.get(`/api/linkedin/check/${uid}`)
+          if (st.connected) {
+            clearInterval(poll)
+            setStatus(true)
+            setConnecting(false)
+            onSettingsUpdate({ linkedin: { ...li, connected: true } })
+          }
+        } catch {}
+      }, 2000)
+  
+      // Стоп через 2 минуты если не подключился
+      setTimeout(() => {
+        clearInterval(poll)
+        setConnecting(false)
+      }, 120000)
+  
+    } catch (e) {
+      setLoginError(e.message || 'Failed to start OAuth')
+      setConnecting(false)
+    }
+  }
+  const handleCookieConnect = async () => {
+    if (!liAt) { setLoginError('Enter li_at cookie'); return }
+    setConnecting(true); setLoginError('')
+    try {
+      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt })
+      if (res.connected) { setStatus(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
+    } catch (e) { setLoginError('Cookie login failed') }
     setConnecting(false)
   }
 
   useEffect(() => {
-    let active = true
-    const loadProfile = async () => {
-      setProfileLoading(true)
-      try {
-        const p = await api.get(`/api/linkedin/profile/${uid}`)
-        if (active) setProfile(p.connected ? p : null)
-      } catch (e) {
-        if (active) setProfile(null)
-      } finally {
-        if (active) setProfileLoading(false)
-      }
-    }
-    if (isConnected) loadProfile()
-    return () => { active = false }
-  }, [uid, isConnected])
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') !== 'connected') return
-    const poll = async () => {
-      setProfileLoading(true)
-      for (let i = 0; i < 15; i += 1) {
-        try {
-          const p = await api.get(`/api/linkedin/profile/${uid}`)
-          if (p.connected) {
-            setProfile(p)
-            onSettingsUpdate({ linkedin: { ...li, connected: true } })
-            const next = new URLSearchParams(window.location.search)
-            next.delete('linkedin')
-            const qs = next.toString()
-            window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
-            setProfileLoading(false)
-            return
-          }
-        } catch (e) {}
-        await new Promise((r) => setTimeout(r, 2000))
-      }
-      setProfileLoading(false)
+    if (params.get('linkedin') === 'connected') {
+      setStatus(true)
+      onSettingsUpdate({ linkedin: { ...li, connected: true } })
+      return
     }
-    poll()
+    // обычная проверка статуса
+    ;(async () => {
+      try {
+        const st = await api.get(`/api/linkedin/check/${uid}`)
+        setStatus(!!st.connected)
+      } catch {}
+    })()
   }, [uid])
 
   const handleDisconnect = async () => {
@@ -162,17 +182,16 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       </div>
 
       {/* Account Section */}
-      <Section title="Account" subtitle={isConnected ? 'Session active' : 'Connect your LinkedIn account'}>
-        {isConnected ? (
-          <div className="card relative py-4 px-4">
-            <span className="absolute top-3 right-3 text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>● Connected</span>
-            <div className="flex items-center gap-3">
-              {profile?.profile_picture_url ? <img src={profile.profile_picture_url} className="w-12 h-12 rounded-full" alt="avatar" /> : <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center font-semibold">{(profile?.name || 'L').split(' ').map((n) => n[0]).join('').slice(0, 2)}</div>}
-              <div>
-                <p className="text-sm font-semibold">{profile?.name || 'LinkedIn User'}</p>
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{profile?.headline || 'Profile connected'}</p>
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{profile?.email || ''}</p>
-              </div>
+      <Section title="Account" subtitle={status ? 'Session active' : 'Connect your LinkedIn account'}>
+        {status ? (
+          <div className="card flex items-center justify-between py-3">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                <rect x="2" y="9" width="4" height="12" />
+                <circle cx="4" cy="4" r="2" />
+              </svg>
+              <span className="text-sm font-medium">LinkedIn Connected</span>
             </div>
             <button
               className="text-xs px-3 py-1.5 rounded-lg mt-3"
