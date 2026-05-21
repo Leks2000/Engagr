@@ -18,7 +18,14 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [newTime, setNewTime] = useState('')
   const [dirty, setDirty] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
-  
+
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [saveState, setSaveState] = useState('idle')
+  const [showSaved, setShowSaved] = useState(false)
+  const saveTimerRef = useRef(null)
+  const savedToastTimerRef = useRef(null)
+    
   // Login form
   const [liAt, setLiAt] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -170,8 +177,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Engagement settings</p>
         </div>
-        {isConnected ? (
-          <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
+        {status ? (          <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
             ● Connected
           </span>
         ) : (
