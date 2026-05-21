@@ -97,7 +97,7 @@ function App() {
 
 
   if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
-  if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={() => { loadSettings(); setScreen('dashboard') }} />
+  if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={loadSettings} />
 
   return (
     <div className="flex flex-col min-h-screen app-shell">

@@ -34,8 +34,12 @@ export default function Onboarding({ userId, onComplete }) {
     const checkConnections = async () => {
       try {
         const data = await api.get(`/api/settings/${userId}`)
-        setLiConnected(!!data?.linkedin?.connected)
-        setRdConnected(!!data?.reddit?.connected)
+        const linkedinConnected = !!data?.linkedin?.connected
+        const redditConnected = !!data?.reddit?.connected
+        setLiConnected(linkedinConnected)
+        setRdConnected(redditConnected)
+        if (linkedinConnected && !redditConnected) setStep(2)
+        if (!linkedinConnected) setStep(1)
       } catch (e) {}
     }
     checkConnections()
