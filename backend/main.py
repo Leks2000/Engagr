@@ -355,6 +355,7 @@ def linkedin_cookie():
     ok = linkedin.verify_li_at(user_id, li_at)
     if ok:
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
+        sched_module.schedule_user_sessions(user_id)
         return jsonify({"connected": True})
     return jsonify({"connected": False, "error": "invalid_cookie"}), 400
 
@@ -379,7 +380,8 @@ def reddit_cookie():
     ok, name = reddit_bot.verify_cookie_login(user_id, rs, tv2)
     if ok:
         storage.update_settings(user_id, {"reddit": {"connected": True, "reddit_username": name}})
-        return jsonify({"connected": True, "username": name})
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"connected": True})
     return jsonify({"connected": False, "error": "invalid_cookies"}), 400
 
 
@@ -387,10 +389,8 @@ def reddit_cookie():
 def reddit_check(user_id):
     import reddit_bot
     connected = reddit_bot.check_login(user_id)
-    settings = storage.get_settings(user_id)
-    username = settings.get("reddit", {}).get("reddit_username", "")
     storage.update_settings(user_id, {"reddit": {"connected": connected}})
-    return jsonify({"connected": connected, "username": username})
+    return jsonify({"connected": connected})
 
 
 # ── Background Posting ────────────────────────────────
