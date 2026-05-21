@@ -24,7 +24,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
-  const [status, setStatus] = useState(li.connected)
+  const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
 
   const save = () => {
     onSettingsUpdate({
@@ -129,17 +129,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
-      {showSuccess && (
-        <div className="fixed inset-0 bg-black/35 z-50 flex items-center justify-center px-5">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
-            <div className="text-5xl mb-3" style={{ color: 'var(--color-success)' }}>✅</div>
-            <h3 className="text-lg font-semibold mb-1">Connected!</h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>Your LinkedIn account is connected.</p>
-            <button className="btn w-full" onClick={() => setShowSuccess(false)}>Continue</button>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
@@ -157,7 +146,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       </div>
 
       {/* Account Section */}
-      <Section title="Account" subtitle={li.connected ? 'Session active' : 'Connect your LinkedIn account'}>
+      <Section title="Account" subtitle={status ? 'Session active' : 'Connect your LinkedIn account'}>
         {status ? (
           <div className="card flex items-center justify-between py-3">
             <div className="flex items-center gap-2">
@@ -176,8 +165,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             >
               {disconnecting ? 'Disconnecting...' : 'Disconnect'}
             </button>
-            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
-            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         ) : (
           <div className="card">
@@ -188,16 +175,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                 <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Your password is used once to create a session. Only cookies are saved.</p>
               </div>
             </div>
-            <input
-              type="text"
-              className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-              placeholder="li_at cookie value"
-              value={liAt}
-              onChange={e => setLiAt(e.target.value)}
-              style={{ borderColor: '#ddd' }}
-              autoComplete="email"
-            />
-
             {loginError && (
               <p className="text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
             )}
@@ -227,8 +204,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                 </>
               )}
             </button>
-            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
-            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         )}
       </Section>
@@ -326,8 +301,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               style={{ borderColor: '#ddd' }}
             />
             <button className="btn btn-sm" onClick={addSessionTime}>Add</button>
-            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
-            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         )}
       </Section>
