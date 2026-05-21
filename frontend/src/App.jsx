@@ -46,10 +46,22 @@ const NAV_ITEMS = [
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
+  const [webAppReady, setWebAppReady] = useState(!window.Telegram?.WebApp)
 
   useEffect(() => {
-    tg?.expand?.(); tg?.ready?.(); loadSettings()
+    const webApp = window.Telegram?.WebApp
+    if (webApp) {
+      try { webApp.ready?.(); webApp.expand?.() } catch {}
+      setWebAppReady(true)
+    } else {
+      const timer = setTimeout(() => setWebAppReady(true), 500)
+      return () => clearTimeout(timer)
+    }
   }, [])
+
+  useEffect(() => {
+    if (webAppReady) loadSettings()
+  }, [webAppReady, loadSettings])
 
   const loadSettings = useCallback(async () => {
     try {
@@ -71,7 +83,7 @@ function App() {
     }
   }, [])
 
-  if (screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
+  if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
   if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={() => { loadSettings(); setScreen('dashboard') }} />
 
   return (
