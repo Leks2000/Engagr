@@ -12,7 +12,7 @@ import Queue from './screens/Queue'
 
 const tg = window.Telegram?.WebApp
 const userId = tg?.initDataUnsafe?.user?.id?.toString() || 'dev_user'
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
 export const api = {
   async get(path) {
@@ -62,6 +62,14 @@ function App() {
   useEffect(() => {
     if (webAppReady) loadSettings()
   }, [webAppReady, loadSettings])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      window.history.replaceState({}, '', '/')
+      loadSettings().then(() => setScreen('linkedin'))
+    }
+  }, [loadSettings])
 
   const loadSettings = useCallback(async () => {
     try {

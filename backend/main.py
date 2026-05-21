@@ -8,6 +8,7 @@ import sys
 import asyncio
 import logging
 import threading
+import requests
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -328,7 +329,6 @@ def linkedin_callback():
     if not code or not user_id:
         return jsonify({"error": "code and state are required"}), 400
     try:
-        import requests
         resp = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={"grant_type": "authorization_code", "code": code, "redirect_uri": LINKEDIN_REDIRECT_URI, "client_id": LINKEDIN_CLIENT_ID, "client_secret": LINKEDIN_CLIENT_SECRET}, timeout=20)
         data = resp.json()
         token = data.get("access_token", "")
@@ -338,10 +338,60 @@ def linkedin_callback():
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
         if MINI_APP_URL:
             from flask import redirect
-            return redirect(MINI_APP_URL)
+            sep = "&" if "?" in MINI_APP_URL else "?"
+            return redirect(f"{MINI_APP_URL}{sep}linkedin=connected")
         return jsonify({"status": "ok", "connected": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/linkedin/profile/<user_id>", methods=["GET"])
+def linkedin_profile(user_id):
+    import linkedin
+
+    try:
+        auth = linkedin._load_auth(user_id)
+        token = auth.get("access_token", "")
+        if not token:
+            return jsonify({"connected": False})
+
+        headers = {"Authorization": f"Bearer {token}"}
+        me = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
+        if me.status_code != 200:
+            return jsonify({"connected": False})
+        me_data = me.json()
+
+        email_resp = requests.get(
+            "https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))",
+            headers=headers,
+            timeout=20,
+        )
+        email = ""
+        if email_resp.status_code == 200:
+            email_data = email_resp.json()
+            email = (((email_data.get("elements") or [{}])[0]).get("handle~") or {}).get("emailAddress", "")
+
+        first_name = ((me_data.get("localizedFirstName") or "").strip())
+        last_name = ((me_data.get("localizedLastName") or "").strip())
+        full_name = f"{first_name} {last_name}".strip()
+        profile_picture_url = ""
+        display_image = ((me_data.get("profilePicture") or {}).get("displayImage~") or {})
+        elements = display_image.get("elements") or []
+        if elements:
+            identifiers = elements[-1].get("identifiers") or []
+            if identifiers:
+                profile_picture_url = identifiers[0].get("identifier", "")
+
+        return jsonify({
+            "connected": True,
+            "name": full_name,
+            "headline": me_data.get("headline", ""),
+            "profile_picture_url": profile_picture_url,
+            "email": email,
+        })
+    except Exception as e:
+        logger.error(f"linkedin profile fetch failed user={user_id}: {e}")
+        return jsonify({"connected": False})
 
 
 @api.route("/api/linkedin/cookie", methods=["POST"])
