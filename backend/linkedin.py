@@ -1,11 +1,13 @@
 """LinkedIn integration via unofficial linkedin-api (no browser automation)."""
 
 import logging
+import re
 from linkedin_api import Linkedin
 
 logger = logging.getLogger(__name__)
 
 _clients: dict[str, Linkedin] = {}
+_profile_ids: dict[str, str] = {}
 
 
 def _verification_required(exc: Exception) -> bool:
@@ -13,12 +15,32 @@ def _verification_required(exc: Exception) -> bool:
     return any(k in text for k in ["challenge", "checkpoint", "verify", "verification", "security"])
 
 
+def _extract_activity_urn(post_url: str) -> str | None:
+    m = re.search(r"/(?:feed/update|posts)/[^\s]*?(\d{8,})", post_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"activity:(\d{8,})", post_url)
+    return m.group(1) if m else None
+
+
+def _extract_profile_public_id(profile_id: str) -> str:
+    profile_id = profile_id.strip()
+    m = re.search(r"linkedin\.com/in/([^/?#]+)", profile_id)
+    if m:
+        return m.group(1)
+    return profile_id
+
+
+def _post_url_from_urn(activity_urn: str) -> str:
+    return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_urn}/"
+
+
 def login_with_playwright(user_id: str, email: str, password: str) -> tuple[bool, str]:
-    """Backward-compatible name; now uses linkedin-api HTTP session login."""
     try:
         client = Linkedin(email, password)
-        _ = client.get_profile("me")
+        profile = client.get_profile("me")
         _clients[user_id] = client
+        _profile_ids[user_id] = profile.get("profile_id") or profile.get("public_id") or ""
         logger.info("LinkedIn login OK for user %s", user_id)
         return True, ""
     except Exception as e:
@@ -33,43 +55,102 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
     if not client:
         return False
     try:
-        client.get_profile("me")
+        profile = client.get_profile("me")
+        _profile_ids[user_id or ""] = profile.get("profile_id") or profile.get("public_id") or ""
         return True
-    except Exception:
+    except Exception as e:
+        logger.error("LinkedIn check_login failed for user=%s: %s", user_id, e)
         return False
 
 
 async def scrape_posts(_playwright_unused, keywords: list[str], max_posts: int = 10, user_id: str | None = None) -> list[dict]:
-    """Best-effort feed replacement: returns empty list when post search is unavailable."""
     client = _clients.get(user_id or "")
     if not client:
         return []
     posts: list[dict] = []
     try:
-        for kw in keywords[:5]:
-            try:
-                # linkedin-api does not reliably expose public content search across all accounts.
-                # Keep compatibility by returning no posts when unavailable.
-                _ = client.search_people(keywords=kw, limit=1)
-            except Exception:
+        feed_items = client.get_feed_posts(limit=max(20, max_posts * 3), exclude_promoted_posts=True)
+        for item in feed_items:
+            urn = item.get("urn_id") or item.get("urn") or ""
+            activity_urn = re.sub(r"\D", "", str(urn)) if urn else ""
+            commentary = item.get("commentary") or {}
+            text = (commentary.get("text") or {}).get("text") or item.get("text") or ""
+            if not text:
                 continue
+            if keywords and not any(k.lower() in text.lower() for k in keywords):
+                continue
+            author = item.get("actor", {}).get("name", {}).get("text") if isinstance(item.get("actor"), dict) else ""
+            reactions = item.get("socialDetail", {}).get("totalSocialActivityCounts", {}).get("numLikes", 0)
+            if activity_urn:
+                posts.append({
+                    "id": f"li_{activity_urn}",
+                    "text": text[:1000],
+                    "url": _post_url_from_urn(activity_urn),
+                    "author": author or "",
+                    "reactions": reactions or 0,
+                    "excerpt": text[:200],
+                    "platform": "linkedin",
+                })
             if len(posts) >= max_posts:
                 break
     except Exception as e:
-        logger.error("LinkedIn scrape error: %s", e)
+        logger.error("LinkedIn scrape error user=%s: %s", user_id, e)
+        return []
     return posts[:max_posts]
 
 
 async def post_comment(_playwright_unused, post_url: str, comment: str, user_id: str | None = None) -> bool:
-    logger.warning("LinkedIn comment not supported with current HTTP-only implementation. url=%s", post_url)
-    return False
+    client = _clients.get(user_id or "")
+    if not client:
+        return False
+    activity_urn = _extract_activity_urn(post_url)
+    if not activity_urn:
+        logger.error("LinkedIn comment failed: unable to parse activity urn from %s", post_url)
+        return False
+    try:
+        payload = {"message": {"attributes": [], "text": comment}}
+        resp = client._post(f"/voyagerSocialDashFeedUpdates/{activity_urn}/comments", data=payload)
+        return resp.status_code in (200, 201)
+    except Exception as e:
+        logger.error("LinkedIn comment failed user=%s post=%s err=%s", user_id, post_url, e)
+        return False
 
 
 async def like_post(_playwright_unused, post_url: str, user_id: str | None = None) -> bool:
-    logger.warning("LinkedIn like not supported with current HTTP-only implementation. url=%s", post_url)
-    return False
+    client = _clients.get(user_id or "")
+    if not client:
+        return False
+    activity_urn = _extract_activity_urn(post_url)
+    if not activity_urn:
+        logger.error("LinkedIn like failed: unable to parse activity urn from %s", post_url)
+        return False
+    try:
+        had_error = client.react_to_post(activity_urn, reaction_type="LIKE")
+        return not had_error
+    except Exception as e:
+        logger.error("LinkedIn like failed user=%s post=%s err=%s", user_id, post_url, e)
+        return False
 
 
 async def add_connection(_playwright_unused, user_id: str, keywords: list[str]):
-    logger.warning("LinkedIn add_connection not supported with current HTTP-only implementation. keywords=%s", keywords)
-    return None
+    client = _clients.get(user_id or "")
+    if not client:
+        return False
+    try:
+        for kw in keywords[:5]:
+            people = client.search_people(keywords=kw, limit=10)
+            for person in people:
+                target = person.get("public_id") or person.get("profile_id")
+                if not target:
+                    continue
+                target = _extract_profile_public_id(str(target))
+                try:
+                    had_error = client.add_connection(target)
+                    if had_error is False or had_error is None:
+                        return True
+                except Exception as e:
+                    logger.error("LinkedIn add connection failed target=%s user=%s err=%s", target, user_id, e)
+                    continue
+    except Exception as e:
+        logger.error("LinkedIn add_connection failed user=%s err=%s", user_id, e)
+    return False

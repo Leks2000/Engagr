@@ -1,297 +1,193 @@
-"""Engagr — Reddit automation via OAuth2 + requests (no browser)."""
+"""Engagr — Reddit automation via asyncpraw (no browser automation)."""
 
+import asyncio
 import json
-import random
 import logging
-import time
+from pathlib import Path
 
-import requests as http_requests
+import asyncpraw
+from asyncprawcore import Forbidden, OAuthException, ResponseException
 
-from config import reddit_cookies_path, DAILY_LIMITS, DATA_DIR
+from config import DATA_DIR
 import storage
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
+
+def _creds_path(user_id: str) -> Path:
+    return DATA_DIR / str(user_id) / "reddit_credentials.json"
 
 
-# ── Cookie-based session ─────────────────────────────
+def _save_credentials(user_id: str, username: str, password: str):
+    path = _creds_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"username": username, "password": password}, indent=2), encoding="utf-8")
 
-def _get_session(user_id: str) -> http_requests.Session | None:
-    """Build a requests.Session using saved Reddit cookies."""
-    cpath = reddit_cookies_path(user_id)
-    if not cpath.exists():
-        logger.warning(f"No Reddit cookies for user {user_id}")
+
+def _load_credentials(user_id: str) -> dict | None:
+    path = _creds_path(user_id)
+    if not path.exists():
         return None
-
     try:
-        cookies_list = json.loads(cpath.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error(f"Error reading Reddit cookies: {e}")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("username") and data.get("password"):
+            return data
+    except (OSError, json.JSONDecodeError):
         return None
-
-    session = http_requests.Session()
-    session.headers.update({"User-Agent": _USER_AGENT})
-
-    for c in cookies_list:
-        session.cookies.set(
-            c["name"], c["value"],
-            domain=c.get("domain", ".reddit.com"),
-            path=c.get("path", "/"),
-        )
-
-    return session
+    return None
 
 
+async def _build_client(user_id: str):
+    creds = _load_credentials(user_id)
+    if not creds:
+        return None
+    return asyncpraw.Reddit(
+        client_id="",
+        client_secret="",
+        username=creds["username"],
+        password=creds["password"],
+        user_agent=f"engagr-bot:{user_id}:v1.0",
+        check_for_async=False,
+    )
+
+
+async def _verify_client(client):
+    me = await client.user.me()
+    return me.name if me else ""
 
 
 def check_login(user_id: str) -> bool:
-    """Verify if Reddit cookies are still valid."""
-    session = _get_session(user_id)
-    if not session:
-        return False
-    try:
-        token = session.cookies.get("oauth_token")
-        headers = {"Authorization": f"bearer {token}", "User-Agent": _USER_AGENT}
-        resp = session.get("https://oauth.reddit.com/api/v1/me", headers=headers, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            name = data.get("name", "")
-            return bool(name)
-    except Exception as e:
-        logger.error(f"Reddit login check failed: {e}")
-    return False
+    async def _inner():
+        client = await _build_client(user_id)
+        if not client:
+            return False
+        try:
+            return bool(await _verify_client(client))
+        except (OAuthException, ResponseException, Forbidden) as e:
+            logger.warning("Reddit auth invalid for user %s: %s", user_id, e)
+            return False
+        finally:
+            await client.close()
+    return asyncio.run(_inner())
 
-
-# ── Playwright Login (one-time) ──────────────────────
 
 def login_with_playwright(user_id: str, username: str, password: str) -> tuple[bool, str]:
-    """Backward-compatible name; now performs OAuth2 password grant login."""
-    session = http_requests.Session()
-    session.headers.update({"User-Agent": _USER_AGENT})
-    try:
-        resp = session.post(
-            "https://www.reddit.com/api/v1/access_token",
-            auth=http_requests.auth.HTTPBasicAuth("", ""),
-            data={
-                "grant_type": "password",
-                "username": username,
-                "password": password,
-                "scope": "identity history read submit vote",
-            },
-            headers={"User-Agent": _USER_AGENT},
-            timeout=20,
+    """Backward-compatible function name; uses asyncpraw credentials login."""
+    async def _inner():
+        client = asyncpraw.Reddit(
+            client_id="",
+            client_secret="",
+            username=username,
+            password=password,
+            user_agent=f"engagr-bot:{user_id}:v1.0",
+            check_for_async=False,
         )
-        if resp.status_code != 200:
-            return False, "Login failed — check credentials"
-        token = resp.json().get("access_token")
-        if not token:
-            return False, "Login failed — no access token"
+        try:
+            profile_name = await _verify_client(client)
+            if not profile_name:
+                return False, "Login failed — unable to fetch profile"
+            _save_credentials(user_id, username, password)
+            logger.info("Reddit login OK for user %s as u/%s", user_id, profile_name)
+            return True, profile_name
+        except (OAuthException, ResponseException, Forbidden) as e:
+            logger.error("Reddit login auth error: %s", e)
+            return False, "Login failed — check username/password"
+        except Exception as e:
+            logger.error("Reddit login error: %s", e)
+            return False, str(e)
+        finally:
+            await client.close()
 
-        # Fetch username from OAuth API
-        oauth_headers = {"Authorization": f"bearer {token}", "User-Agent": _USER_AGENT}
-        me = session.get("https://oauth.reddit.com/api/v1/me", headers=oauth_headers, timeout=15)
-        if me.status_code != 200:
-            return False, "Login failed — unable to fetch profile"
-        reddit_name = me.json().get("name", username)
+    return asyncio.run(_inner())
 
-        cpath = reddit_cookies_path(user_id)
-        cpath.parent.mkdir(parents=True, exist_ok=True)
-        cpath.write_text(json.dumps([{"name": "oauth_token", "value": token, "domain": "oauth.reddit.com", "path": "/"}], indent=2), encoding="utf-8")
-        logger.info(f"Reddit login OK for user {user_id} as u/{reddit_name}")
-        return True, reddit_name
-    except Exception as e:
-        logger.error(f"Reddit OAuth login error: {e}")
-        return False, str(e)
-
-
-# ── Post Scraping ────────────────────────────────────
 
 def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
-    """
-    Scrape Reddit posts from user's configured subreddits matching keywords.
-    Uses requests + cookies (JSON API).
-    """
-    session = _get_session(user_id)
-    if not session:
-        return []
-
-    settings = storage.get_settings(user_id)
-    reddit_cfg = settings.get("reddit", {})
-    subreddits = reddit_cfg.get("subreddits", [])
-    keywords = reddit_cfg.get("keywords", [])
-
-    if not subreddits:
-        logger.warning(f"No subreddits configured for user {user_id}")
-        return []
-
-    posts = []
-    token = session.cookies.get("oauth_token")
-    headers = {"User-Agent": _USER_AGENT, "Authorization": f"bearer {token}"}
-
-    for sub_name in subreddits:
+    async def _inner():
+        client = await _build_client(user_id)
+        if not client:
+            return []
+        settings = storage.get_settings(user_id)
+        reddit_cfg = settings.get("reddit", {})
+        subreddits = reddit_cfg.get("subreddits", [])
+        keywords = [k.strip().lower() for k in reddit_cfg.get("keywords", []) if k.strip()]
+        if not subreddits:
+            return []
+        posts, seen = [], set()
         try:
-            if keywords:
-                for keyword in keywords[:3]:
-                    url = (
-                        f"https://oauth.reddit.com/r/{sub_name}/search"
-                        f"?q={keyword}&sort=new&t=day&restrict_sr=on&limit=5"
-                    )
-                    try:
-                        resp = session.get(url, headers=headers, timeout=15)
-                        if resp.status_code != 200:
-                            continue
-                        data = resp.json()
-                        children = data.get("data", {}).get("children", [])
-                        for child in children:
-                            post = child.get("data", {})
-                            posts.append(_parse_post(post, sub_name))
-                        time.sleep(random.uniform(1, 3))
-                    except Exception as e:
-                        logger.debug(f"Search error in r/{sub_name}: {e}")
-            else:
-                url = f"https://oauth.reddit.com/r/{sub_name}/hot?limit=10"
-                resp = session.get(url, headers=headers, timeout=15)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    children = data.get("data", {}).get("children", [])
-                    for child in children:
-                        post = child.get("data", {})
-                        posts.append(_parse_post(post, sub_name))
-
-            time.sleep(random.uniform(1, 3))
-
+            for sub_name in subreddits:
+                sub = await client.subreddit(sub_name)
+                async for submission in sub.new(limit=20):
+                    text = f"{submission.title}\n\n{submission.selftext or ''}".strip()
+                    if len(text) < 15:
+                        continue
+                    if keywords and not any(k in text.lower() for k in keywords):
+                        continue
+                    pid = f"rd_{submission.id}"
+                    if pid in seen:
+                        continue
+                    seen.add(pid)
+                    posts.append({
+                        "id": pid,
+                        "platform": "reddit",
+                        "reddit_id": submission.id,
+                        "text": text[:500],
+                        "excerpt": text[:200],
+                        "url": f"https://reddit.com{submission.permalink}",
+                        "reactions": submission.score,
+                        "author": str(submission.author) if submission.author else "",
+                        "subreddit": sub_name,
+                    })
+                    if len(posts) >= max_posts:
+                        return posts
+        except (OAuthException, ResponseException, Forbidden) as e:
+            logger.error("Reddit scrape auth error for user %s: %s", user_id, e)
+            return []
         except Exception as e:
-            logger.error(f"Error scraping r/{sub_name}: {e}")
-            continue
+            logger.error("Reddit scrape error for user %s: %s", user_id, e)
+            return []
+        finally:
+            await client.close()
+        return posts
 
-    # Filter valid + deduplicate
-    seen_ids = set()
-    unique = []
-    for p in posts:
-        if p and p["id"] not in seen_ids:
-            seen_ids.add(p["id"])
-            unique.append(p)
+    return asyncio.run(_inner())
 
-    random.shuffle(unique)
-    unique = unique[:max_posts]
-    logger.info(f"Scraped {len(unique)} Reddit posts for user {user_id}")
-    return unique
-
-
-def _parse_post(post: dict, sub_name: str) -> dict | None:
-    """Parse a single Reddit JSON post into our format."""
-    try:
-        if post.get("stickied"):
-            return None
-        if post.get("score", 0) < 5:
-            return None
-        if not post.get("author"):
-            return None
-
-        title = post.get("title", "")
-        selftext = post.get("selftext", "")
-        text = title
-        if selftext:
-            text += "\n\n" + selftext
-
-        if not text or len(text) < 15:
-            return None
-
-        # Skip hiring/spam
-        title_lower = title.lower()
-        skip_words = ["hiring", "job opening", "looking for", "[hiring]"]
-        if any(w in title_lower for w in skip_words):
-            return None
-
-        return {
-            "id": f"rd_{post['id']}",
-            "platform": "reddit",
-            "reddit_id": post["id"],
-            "text": text[:500],
-            "excerpt": text[:200],
-            "url": f"https://reddit.com{post.get('permalink', '')}",
-            "reactions": post.get("score", 0),
-            "author": post.get("author", ""),
-            "subreddit": sub_name,
-        }
-    except Exception:
-        return None
-
-
-# ── Actions ──────────────────────────────────────────
 
 def post_comment(user_id: str, reddit_id: str, comment: str) -> bool:
-    """Post a comment on a Reddit submission using cookies."""
-    session = _get_session(user_id)
-    if not session:
-        return False
-
-    modhash = _get_modhash(session)
-    if not modhash:
-        logger.error("No modhash — cookies may be expired")
-        return False
-
-    try:
-        resp = session.post(
-            "https://oauth.reddit.com/api/comment",
-            data={
-                "thing_id": f"t3_{reddit_id}",
-                "text": comment,
-                "uh": modhash,
-            },
-            headers={"User-Agent": _USER_AGENT, "X-Modhash": modhash},
-            timeout=15,
-        )
-
-        if resp.status_code == 200:
-            result = resp.json()
-            if not result.get("json", {}).get("errors"):
-                logger.info(f"Comment posted on reddit t3_{reddit_id}")
-                return True
-            else:
-                logger.error(f"Reddit comment errors: {result['json']['errors']}")
-        else:
-            logger.error(f"Reddit comment failed: {resp.status_code}")
-
-        return False
-
-    except Exception as e:
-        logger.error(f"Error posting Reddit comment: {e}")
-        return False
+    async def _inner():
+        client = await _build_client(user_id)
+        if not client:
+            return False
+        try:
+            submission = await client.submission(id=reddit_id)
+            await submission.reply(comment)
+            return True
+        except (OAuthException, ResponseException, Forbidden) as e:
+            logger.error("Reddit comment auth error user=%s post=%s err=%s", user_id, reddit_id, e)
+            return False
+        except Exception as e:
+            logger.error("Reddit comment failed user=%s post=%s err=%s", user_id, reddit_id, e)
+            return False
+        finally:
+            await client.close()
+    return asyncio.run(_inner())
 
 
 def upvote_post(user_id: str, reddit_id: str) -> bool:
-    """Upvote a Reddit submission using cookies."""
-    session = _get_session(user_id)
-    if not session:
-        return False
-
-    modhash = _get_modhash(session)
-    if not modhash:
-        return False
-
-    try:
-        resp = session.post(
-            "https://oauth.reddit.com/api/vote",
-            data={
-                "id": f"t3_{reddit_id}",
-                "dir": 1,
-                "uh": modhash,
-            },
-            headers={"User-Agent": _USER_AGENT, "X-Modhash": modhash},
-            timeout=15,
-        )
-
-        if resp.status_code == 200:
-            logger.info(f"Upvoted reddit post {reddit_id}")
+    async def _inner():
+        client = await _build_client(user_id)
+        if not client:
+            return False
+        try:
+            submission = await client.submission(id=reddit_id)
+            await submission.upvote()
             return True
-        return False
+        except (OAuthException, ResponseException, Forbidden) as e:
+            logger.error("Reddit upvote auth error user=%s post=%s err=%s", user_id, reddit_id, e)
+            return False
+        except Exception as e:
+            logger.error("Reddit upvote failed user=%s post=%s err=%s", user_id, reddit_id, e)
+            return False
+        finally:
+            await client.close()
 
-    except Exception as e:
-        logger.error(f"Error upvoting Reddit post: {e}")
-        return False
+    return asyncio.run(_inner())
