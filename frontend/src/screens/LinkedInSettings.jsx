@@ -85,20 +85,8 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') === 'connected') {
-      setStatus(true)
-      onSettingsUpdate({ linkedin: { ...li, connected: true } })
-      return
-    }
-    // обычная проверка статуса
-    ;(async () => {
-      try {
-        const st = await api.get(`/api/linkedin/check/${uid}`)
-        setStatus(!!st.connected)
-      } catch {}
-    })()
-  }, [uid])
+    setStatus(!!(settings?.linkedin?.connected))
+  }, [settings])
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
