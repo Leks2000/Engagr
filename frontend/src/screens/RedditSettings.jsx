@@ -22,7 +22,6 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(rd.connected)
-  const [showSuccess, setShowSuccess] = useState(false)
 
   const markDirty = () => setDirty(true)
 
@@ -55,7 +54,6 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
       })
       if (res.connected) {
         setTokenV2('')
-        setShowSuccess(true)
         onSettingsUpdate({
           reddit: {
             ...rd,
