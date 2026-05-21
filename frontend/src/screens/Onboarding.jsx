@@ -26,7 +26,7 @@ export default function Onboarding({ userId, onComplete }) {
     if (params.get('linkedin') === 'connected') {
       setLiConnected(true)
       setStep(2)
-      window.history.replaceState({}, '', '/')
+      window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
 

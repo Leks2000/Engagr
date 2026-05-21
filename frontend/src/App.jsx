@@ -11,7 +11,11 @@ import RedditSettings from './screens/RedditSettings'
 import Queue from './screens/Queue'
 
 const tg = window.Telegram?.WebApp
-const userId = tg?.initDataUnsafe?.user?.id?.toString() || 'dev_user'
+const urlParams = new URLSearchParams(window.location.search)
+const userIdFromQuery = urlParams.get('user_id')
+const userIdFromStorage = window.localStorage.getItem('engagr_user_id')
+const userId = tg?.initDataUnsafe?.user?.id?.toString() || userIdFromQuery || userIdFromStorage || 'dev_user'
+window.localStorage.setItem('engagr_user_id', userId)
 const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
 export const api = {
@@ -74,15 +78,6 @@ function App() {
     if (webAppReady) loadSettings()
   }, [webAppReady, loadSettings])
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') === 'connected') {
-      window.history.replaceState({}, '', '/')
-      // Сначала грузим настройки, потом принудительно ставим linkedin
-      loadSettings().then(() => setScreen('linkedin'))
-    }
-  }, [loadSettings])
-    
   const handleSettingsUpdate = useCallback(async (updates) => {
     try {
       await api.put(`/api/settings/${userId}`, updates)
