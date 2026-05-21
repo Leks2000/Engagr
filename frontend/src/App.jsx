@@ -63,6 +63,14 @@ function App() {
     if (webAppReady) loadSettings()
   }, [webAppReady, loadSettings])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      window.history.replaceState({}, '', '/')
+      loadSettings().then(() => setScreen('linkedin'))
+    }
+  }, [loadSettings])
+
   const loadSettings = useCallback(async () => {
     try {
       const data = await api.get(`/api/settings/${userId}`)

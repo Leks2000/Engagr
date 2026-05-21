@@ -12,20 +12,34 @@ export default function Onboarding({ userId, onComplete }) {
   const [step, setStep] = useState(0)
   const [language, setLanguage] = useState('en')
 
-  // LinkedIn
-  const [liEmail, setLiEmail] = useState('')
-  const [liPassword, setLiPassword] = useState('')
   const [liLoading, setLiLoading] = useState(false)
   const [liConnected, setLiConnected] = useState(false)
   const [liError, setLiError] = useState('')
 
   // Reddit
-  const [rdUsername, setRdUsername] = useState('')
-  const [rdPassword, setRdPassword] = useState('')
   const [rdLoading, setRdLoading] = useState(false)
   const [rdConnected, setRdConnected] = useState(false)
-  const [rdDisplayName, setRdDisplayName] = useState('')
   const [rdError, setRdError] = useState('')
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      setLiConnected(true)
+      setStep(2)
+      window.history.replaceState({}, '', '/')
+    }
+  }, [])
+
+  useEffect(() => {
+    const checkConnections = async () => {
+      try {
+        const data = await api.get(`/api/settings/${userId}`)
+        setLiConnected(!!data?.linkedin?.connected)
+        setRdConnected(!!data?.reddit?.connected)
+      } catch (e) {}
+    }
+    checkConnections()
+  }, [userId])
 
   const handleLanguageSelect = async (lang) => {
     setLanguage(lang)
@@ -35,74 +49,28 @@ export default function Onboarding({ userId, onComplete }) {
     setStep(1)
   }
 
-  // ── LinkedIn Login ──
+  // ── LinkedIn OAuth ──
   const handleLinkedInLogin = async () => {
-    if (!liEmail || !liPassword) {
-      setLiError('Enter email and password')
-      return
-    }
     setLiLoading(true)
     setLiError('')
     try {
-      const res = await api.post('/api/linkedin/login', {
-        user_id: userId,
-        email: liEmail,
-        password: liPassword,
-      })
-      if (res.connected) {
-        setLiConnected(true)
-        setLiPassword('') // clear password from memory
-      }
+      const res = await api.get(`/api/linkedin/auth/${userId}`)
+      window.location.href = res.url
     } catch (e) {
-      const msg = e.message || 'Login failed'
-      // Try to extract error from API response
-      try {
-        const resp = await fetch('/api/linkedin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, email: liEmail, password: liPassword }),
-        })
-        const data = await resp.json()
-        setLiError(data.error || msg)
-      } catch {
-        setLiError(msg)
-      }
+      setLiError(e.message || 'Failed to start LinkedIn OAuth')
     }
     setLiLoading(false)
   }
 
   // ── Reddit Login ──
   const handleRedditLogin = async () => {
-    if (!rdUsername || !rdPassword) {
-      setRdError('Enter username and password')
-      return
-    }
     setRdLoading(true)
     setRdError('')
     try {
-      const res = await api.post('/api/reddit/login', {
-        user_id: userId,
-        username: rdUsername,
-        password: rdPassword,
-      })
-      if (res.connected) {
-        setRdConnected(true)
-        setRdDisplayName(res.username || rdUsername)
-        setRdPassword('') // clear password from memory
-      }
+      const res = await api.get(`/api/reddit/auth/${userId}`)
+      window.location.href = res.url
     } catch (e) {
-      const msg = e.message || 'Login failed'
-      try {
-        const resp = await fetch('/api/reddit/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, username: rdUsername, password: rdPassword }),
-        })
-        const data = await resp.json()
-        setRdError(data.error || msg)
-      } catch {
-        setRdError(msg)
-      }
+      setRdError(e.message || 'Failed to start Reddit OAuth')
     }
     setRdLoading(false)
   }
@@ -176,9 +144,7 @@ export default function Onboarding({ userId, onComplete }) {
       {step === 1 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Connect LinkedIn</h2>
-          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
-            We'll securely log in and save your session cookies
-          </p>
+          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>Connect your LinkedIn account with OAuth</p>
 
           {liConnected ? (
             <div className="card text-center py-8 mb-4">
@@ -189,39 +155,7 @@ export default function Onboarding({ userId, onComplete }) {
               </p>
             </div>
           ) : (
-            <div className="space-y-3 mb-4">
-              <div className="card">
-                <div className="flex items-start gap-3 mb-4">
-                  <span className="text-xl">🔒</span>
-                  <div>
-                    <p className="font-medium text-sm mb-1">Secure login</p>
-                    <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                      Your password is used only once to log in. We save session cookies, not your credentials.
-                    </p>
-                  </div>
-                </div>
-
-                <input
-                  type="email"
-                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-                  placeholder="LinkedIn email"
-                  value={liEmail}
-                  onChange={e => setLiEmail(e.target.value)}
-                  style={{ borderColor: '#ddd' }}
-                  autoComplete="email"
-                />
-                <input
-                  type="password"
-                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none"
-                  placeholder="Password"
-                  value={liPassword}
-                  onChange={e => setLiPassword(e.target.value)}
-                  style={{ borderColor: '#ddd' }}
-                  autoComplete="current-password"
-                  onKeyDown={e => e.key === 'Enter' && handleLinkedInLogin()}
-                />
-              </div>
-            </div>
+            <div className="space-y-3 mb-4" />
           )}
 
           {liError && (
@@ -256,7 +190,7 @@ export default function Onboarding({ userId, onComplete }) {
                       <rect x="2" y="9" width="4" height="12" />
                       <circle cx="4" cy="4" r="2" />
                     </svg>
-                    Connect LinkedIn
+                    Connect via LinkedIn
                   </>
                 )}
               </button>
@@ -276,54 +210,15 @@ export default function Onboarding({ userId, onComplete }) {
       {step === 2 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Connect Reddit</h2>
-          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>
-            Log in with your Reddit credentials
-          </p>
+          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>Connect your Reddit account with OAuth</p>
 
           {rdConnected ? (
             <div className="card text-center py-8 mb-4">
               <div className="text-4xl mb-3">✅</div>
               <p className="font-semibold text-sm mb-1">Reddit Connected!</p>
-              {rdDisplayName && (
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                  Logged in as <strong>u/{rdDisplayName}</strong>
-                </p>
-              )}
             </div>
           ) : (
-            <div className="space-y-3 mb-4">
-              <div className="card">
-                <div className="flex items-start gap-3 mb-4">
-                  <span className="text-xl">🔒</span>
-                  <div>
-                    <p className="font-medium text-sm mb-1">Secure login</p>
-                    <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                      Your password is used only once to create a session. We save cookies, not your credentials.
-                    </p>
-                  </div>
-                </div>
-
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-                  placeholder="Reddit username"
-                  value={rdUsername}
-                  onChange={e => setRdUsername(e.target.value)}
-                  style={{ borderColor: '#ddd' }}
-                  autoComplete="username"
-                />
-                <input
-                  type="password"
-                  className="w-full px-4 py-3 border rounded-xl text-sm outline-none"
-                  placeholder="Password"
-                  value={rdPassword}
-                  onChange={e => setRdPassword(e.target.value)}
-                  style={{ borderColor: '#ddd' }}
-                  autoComplete="current-password"
-                  onKeyDown={e => e.key === 'Enter' && handleRedditLogin()}
-                />
-              </div>
-            </div>
+            <div className="space-y-3 mb-4" />
           )}
 
           {rdError && (
