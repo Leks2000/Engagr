@@ -76,10 +76,10 @@ function App() {
   return (
     <div className="flex flex-col min-h-screen app-shell">
       <main className="flex-1 overflow-y-auto pb-20">
-        {screen === 'dashboard' && <Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} />}
-        {screen === 'linkedin' && <LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} />}
-        {screen === 'reddit' && <RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} />}
-        {screen === 'queue' && <Queue userId={userId} />}
+        {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+        {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+        {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+        {screen === 'queue' && <div className="page-transition"><Queue userId={userId} /></div>}
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-1" style={{ borderColor: '#e5e7eb' }}>

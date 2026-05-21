@@ -27,7 +27,7 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
       </div>
 
       <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <StatCard label="Comments" value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
           <StatCard label="Likes" value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
           <StatCard label="People Added" value={stats?.linkedin_adds || 0} max={settings?.linkedin?.people_add_range?.[1] || 5} icon={<UsersIcon />} tone="linkedin" />
@@ -35,11 +35,25 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
       </PlatformSection>
 
       <PlatformSection title="Reddit" connected={settings?.reddit?.connected} reddit className="mb-6">
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <StatCard label="Comments" value={stats?.reddit_comments || 0} max={settings?.reddit?.comments_per_day || 15} icon={<MessageIcon />} tone="reddit" />
           <StatCard label="Upvotes" value={stats?.reddit_upvotes || 0} max={settings?.reddit?.upvotes_per_day || 5} icon={<ArrowUpIcon />} tone="reddit" />
         </div>
       </PlatformSection>
+
+      <div className="card stats-footer card-mount" style={{ animationDelay: "260ms" }}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs" style={{ color: "var(--color-muted)" }}>Next Sessions</p>
+            <p className="text-sm font-semibold">LinkedIn: {settings?.linkedin?.session_times?.[0] || "--:--"}</p>
+            <p className="text-sm font-semibold">Reddit: {settings?.reddit?.session_times?.[0] || "--:--"}</p>
+          </div>
+          <div>
+            <p className="text-xs" style={{ color: "var(--color-muted)" }}>Detailed stats</p>
+            <p className="text-sm">Total: {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)+(stats?.linkedin_adds||0)+(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}</p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -53,13 +67,13 @@ function StatCard({ label, value, max, icon, tone }) {
   const done = pct >= 100
   const color = tone === 'reddit' ? '#FF4500' : '#0A66C2'
   return (
-    <div className="card metric-card">
+    <div className="card metric-card card-mount">
       <div className="flex items-start justify-between mb-3">
         <div className="metric-label-wrap"><p className="metric-label">{label}</p><p className="metric-meta">Today</p></div>
         <div className="metric-icon" style={{ color }}>{icon}</div>
       </div>
       <div className="flex items-end justify-between mb-2"><p className="metric-value">{value}</p><p className="metric-max">of {max}</p></div>
-      <div className="metric-progress-bg"><div className="metric-progress-fill" style={{ width: `${pct}%`, background: done ? 'var(--color-success)' : color }} /></div>
+      <div className="metric-progress-bg"><div className="metric-progress-fill progress-animate" style={{ "--target": `${pct}%`, background: done ? 'var(--color-success)' : color }} /></div>
     </div>
   )
 }
