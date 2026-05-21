@@ -36,6 +36,9 @@ def _load_credentials(user_id: str) -> dict | None:
         return None
     return None
 
+def save_cookies(user_id: str, reddit_session: str, token_v2: str):
+    p = reddit_cookies_path(user_id); p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"reddit_session": reddit_session, "token_v2": token_v2}, indent=2), encoding="utf-8")
 
 async def _build_client(user_id: str):
     creds = _load_credentials(user_id)

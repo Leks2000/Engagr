@@ -110,6 +110,17 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
+      {showSuccess && (
+        <div className="fixed inset-0 bg-black/35 z-50 flex items-center justify-center px-5">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
+            <div className="text-5xl mb-3" style={{ color: 'var(--color-success)' }}>✅</div>
+            <h3 className="text-lg font-semibold mb-1">Connected!</h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--color-muted)' }}>Your Reddit account is connected.</p>
+            <button className="btn w-full" onClick={() => setShowSuccess(false)}>Continue</button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold tracking-tight">Reddit</h1>
