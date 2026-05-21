@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { api, userId } from '../App'
 import Toggle from '../components/Toggle'
 import TagInput from '../components/TagInput'
@@ -104,6 +104,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     setDisconnecting(true)
     try {
       await api.post(`/api/linkedin/disconnect/${uid}`)
+      setProfile(null)
       onSettingsUpdate({
         linkedin: {
           ...li,
@@ -118,14 +119,49 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     if (newTime && sessionTimes.length < 3 && !sessionTimes.includes(newTime)) {
       setSessionTimes([...sessionTimes, newTime].sort())
       setNewTime('')
-      markDirty()
     }
   }
 
   const removeSessionTime = (time) => {
     setSessionTimes(sessionTimes.filter(t => t !== time))
-    markDirty()
   }
+
+  const derivedKeywords = useMemo(() => {
+    const source = `${profile?.headline || ''} ${profile?.industry || ''}`.toLowerCase()
+    if (!source.trim()) return []
+    const map = ['startup', 'developer', 'engineering', 'product', 'tech', 'marketing', 'sales', 'founder', 'ai', 'saas']
+    const out = map.filter((k) => source.includes(k)).slice(0, 5)
+    if (!out.length && source.includes('full stack')) return ['startup', 'developer', 'engineering', 'product', 'tech']
+    return out
+  }, [profile])
+
+  useEffect(() => {
+    if (!settings) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(async () => {
+      setSaveState('saving')
+      try {
+        await onSettingsUpdate({
+          linkedin: {
+            ...li,
+            keywords,
+            comments_per_day: commentsPerDay,
+            people_add_range: addRange,
+            add_people_by_keywords: addByKeywords,
+            add_people_keywords: addKeywords,
+            session_times: sessionTimes,
+          },
+        })
+        setSaveState('saved')
+        setShowSaved(true)
+        if (savedToastTimerRef.current) clearTimeout(savedToastTimerRef.current)
+        savedToastTimerRef.current = setTimeout(() => setShowSaved(false), 2000)
+      } catch (e) {
+        setSaveState('idle')
+      }
+    }, 1000)
+    return () => clearTimeout(saveTimerRef.current)
+  }, [keywords, commentsPerDay, addRange, addByKeywords, addKeywords, sessionTimes])
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
@@ -134,7 +170,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Engagement settings</p>
         </div>
-        {status ? (
+        {isConnected ? (
           <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
             ● Connected
           </span>
@@ -158,7 +194,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               <span className="text-sm font-medium">LinkedIn Connected</span>
             </div>
             <button
-              className="text-xs px-3 py-1.5 rounded-lg"
+              className="text-xs px-3 py-1.5 rounded-lg mt-3"
               style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
               onClick={handleDisconnect}
               disabled={disconnecting}
@@ -212,9 +248,18 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       <Section title="Keywords" subtitle="Posts matching these keywords will be targeted">
         <TagInput
           tags={keywords}
-          onChange={(tags) => { setKeywords(tags); markDirty() }}
+          onChange={(tags) => { setKeywords(tags) }}
           placeholder="Add keyword..."
         />
+        {!!derivedKeywords.length && (
+          <div className="flex gap-2 mt-3 flex-wrap">
+            {derivedKeywords.map((k) => (
+              <button key={k} className="text-xs px-2 py-1 rounded-full border" onClick={() => !keywords.includes(k) && setKeywords([...keywords, k])}>
+                + {k}
+              </button>
+            ))}
+          </div>
+        )}
       </Section>
 
       {/* Comments per day */}
@@ -223,7 +268,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           min={1}
           max={15}
           value={commentsPerDay}
-          onChange={(v) => { setCommentsPerDay(v); markDirty() }}
+          onChange={(v) => { setCommentsPerDay(v) }}
         />
       </Section>
 
@@ -243,7 +288,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             <Slider min={1} max={5} value={addRange[0]} onChange={(v) => {
               const newRange = [v, Math.max(v, addRange[1])]
               setAddRange(newRange)
-              markDirty()
             }} />
           </div>
           <div className="flex-1">
@@ -251,7 +295,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             <Slider min={1} max={5} value={addRange[1]} onChange={(v) => {
               const newRange = [Math.min(addRange[0], v), v]
               setAddRange(newRange)
-              markDirty()
             }} />
           </div>
         </div>
@@ -263,13 +306,13 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <span className="text-sm">Enable keyword-based search</span>
           <Toggle
             value={addByKeywords}
-            onChange={(v) => { setAddByKeywords(v); markDirty() }}
+            onChange={(v) => { setAddByKeywords(v) }}
           />
         </div>
         {addByKeywords && (
           <TagInput
             tags={addKeywords}
-            onChange={(tags) => { setAddKeywords(tags); markDirty() }}
+            onChange={(tags) => { setAddKeywords(tags) }}
             placeholder="Add search keyword..."
           />
         )}
@@ -305,12 +348,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         )}
       </Section>
 
-      {/* Save */}
-      {dirty && (
-        <div className="fixed bottom-16 left-0 right-0 px-5 pb-4 pt-2 bg-white animate-slide-up">
-          <button className="btn w-full" onClick={save}>
-            Save Changes
-          </button>
+      {(saveState === 'saving' || showSaved || profileLoading) && (
+        <div className="fixed top-4 right-4 bg-white border rounded-lg px-3 py-2 text-xs shadow">
+          {profileLoading ? 'Loading profile...' : saveState === 'saving' ? 'Saving…' : 'Saved ✓'}
         </div>
       )}
     </div>
