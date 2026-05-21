@@ -94,6 +94,8 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     onComplete()
   }
 
+  const canFinishNow = liConnected && rdConnected
+
   return (
     <div className="min-h-screen flex flex-col px-6 py-8">
       {/* Header */}
@@ -230,7 +232,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
           )}
 
           <div className="flex gap-3 mt-6">
-            {rdConnected ? (
+            {canFinishNow ? (
               <button className="btn flex-1" onClick={handleFinish}>
                 Get Started 🚀
               </button>
@@ -266,7 +268,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
             style={{ color: 'var(--color-muted)' }}
             onClick={handleSkip}
           >
-            {rdConnected ? 'Continue' : 'Skip for now'}
+            {canFinishNow ? 'Continue' : 'Skip for now'}
           </button>
         </div>
       )}
