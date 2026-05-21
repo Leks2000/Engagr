@@ -74,10 +74,6 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (webAppReady) loadSettings()
-  }, [webAppReady, loadSettings])
-
   const handleSettingsUpdate = useCallback(async (updates) => {
     try {
       await api.put(`/api/settings/${userId}`, updates)
@@ -86,6 +82,19 @@ function App() {
       console.error('Failed to save settings:', err)
     }
   }, [])
+
+  useEffect(() => {
+    if (webAppReady) loadSettings()
+  }, [webAppReady])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      window.history.replaceState({}, '', '/')
+      loadSettings().then(() => setScreen('linkedin'))
+    }
+  }, [])
+
 
   if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
   if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={() => { loadSettings(); setScreen('dashboard') }} />
