@@ -24,7 +24,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(li.connected)
-  const [showSuccess, setShowSuccess] = useState(false)
 
   const save = () => {
     onSettingsUpdate({
@@ -58,7 +57,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     setConnecting(true); setLoginError('')
     try {
       const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt })
-      if (res.connected) { setStatus(true); setShowSuccess(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
+      if (res.connected) { setStatus(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
     } catch (e) { setLoginError('Cookie login failed') }
     setConnecting(false)
   }
