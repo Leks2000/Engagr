@@ -17,7 +17,10 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [sessionTimes, setSessionTimes] = useState(li.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
   const [dirty, setDirty] = useState(false)
-
+  const [showSuccess, setShowSuccess] = useState(false)
+  
+  // Login form
+  const [liAt, setLiAt] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -46,14 +49,56 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       window.location.href = res.url
-    } catch (e) { setLoginError(e.message || 'Failed to start OAuth') }
+      
+      // Поллим статус каждые 2 сек пока не подключится
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.get(`/api/linkedin/check/${uid}`)
+          if (st.connected) {
+            clearInterval(poll)
+            setStatus(true)
+            setConnecting(false)
+            onSettingsUpdate({ linkedin: { ...li, connected: true } })
+          }
+        } catch {}
+      }, 2000)
+  
+      // Стоп через 2 минуты если не подключился
+      setTimeout(() => {
+        clearInterval(poll)
+        setConnecting(false)
+      }, 120000)
+  
+    } catch (e) {
+      setLoginError(e.message || 'Failed to start OAuth')
+      setConnecting(false)
+    }
+  }
+  const handleCookieConnect = async () => {
+    if (!liAt) { setLoginError('Enter li_at cookie'); return }
+    setConnecting(true); setLoginError('')
+    try {
+      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt })
+      if (res.connected) { setStatus(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
+    } catch (e) { setLoginError('Cookie login failed') }
     setConnecting(false)
   }
 
-  useEffect(() => { (async () => { try { const st = await api.get(`/api/linkedin/check/${uid}`); setStatus(!!st.connected) } catch {} })() }, [uid])
   useEffect(() => {
-    setStatus(!!(settings?.linkedin?.connected || li.connected))
-  }, [settings, li.connected])
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      setStatus(true)
+      onSettingsUpdate({ linkedin: { ...li, connected: true } })
+      return
+    }
+    // обычная проверка статуса
+    ;(async () => {
+      try {
+        const st = await api.get(`/api/linkedin/check/${uid}`)
+        setStatus(!!st.connected)
+      } catch {}
+    })()
+  }, [uid])
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
