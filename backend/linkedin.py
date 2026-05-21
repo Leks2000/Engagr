@@ -1,18 +1,27 @@
-"""LinkedIn integration via unofficial linkedin-api (no browser automation)."""
+"""LinkedIn integration with oauth/cookie auth and linkedin-api actions."""
 
+import json
 import logging
 import re
 from linkedin_api import Linkedin
+
+from config import WEBSHARE_PROXY_URL, linkedin_cookies_path
 
 logger = logging.getLogger(__name__)
 
 _clients: dict[str, Linkedin] = {}
 _profile_ids: dict[str, str] = {}
 
+def _extract_activity_urn(post_url: str) -> str | None:
+    m = re.search(r"activity:(\d{8,})", post_url)
+    if m:
+        return m.group(1)
+    m = re.search(r"/(?:feed/update|posts)/[^\s]*?(\d{8,})", post_url)
+    return m.group(1) if m else None
 
-def _verification_required(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return any(k in text for k in ["challenge", "checkpoint", "verify", "verification", "security"])
+
+def _post_url_from_urn(activity_urn: str) -> str:
+    return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_urn}/"
 
 
 def _extract_activity_urn(post_url: str) -> str | None:
@@ -45,8 +54,6 @@ def login_with_playwright(user_id: str, email: str, password: str) -> tuple[bool
         return True, ""
     except Exception as e:
         logger.error("LinkedIn login error: %s", e)
-        if _verification_required(e):
-            return False, "verification_required"
         return False, "Login failed — check email/password"
 
 
@@ -67,7 +74,7 @@ async def scrape_posts(_playwright_unused, keywords: list[str], max_posts: int =
     client = _clients.get(user_id or "")
     if not client:
         return []
-    posts: list[dict] = []
+    posts = []
     try:
         feed_items = client.get_feed_posts(limit=max(20, max_posts * 3), exclude_promoted_posts=True)
         for item in feed_items:

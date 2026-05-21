@@ -16,11 +16,12 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
   const [dirty, setDirty] = useState(false)
 
   // Login form
-  const [rdUsername, setRdUsername] = useState('')
-  const [rdPassword, setRdPassword] = useState('')
+  const [redditSession, setRedditSession] = useState('')
+  const [tokenV2, setTokenV2] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [status, setStatus] = useState(rd.connected)
 
   const markDirty = () => setDirty(true)
 
@@ -39,34 +40,34 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
   }
 
   const handleConnect = async () => {
-    if (!rdUsername || !rdPassword) {
-      setLoginError('Enter username and password')
+    if (!redditSession || !tokenV2) {
+      setLoginError('Enter reddit_session and token_v2')
       return
     }
     setConnecting(true)
     setLoginError('')
     try {
-      const res = await api.post('/api/reddit/login', {
+      const res = await api.post('/api/reddit/cookie', {
         user_id: uid,
-        username: rdUsername,
-        password: rdPassword,
+        reddit_session: redditSession,
+        token_v2: tokenV2,
       })
       if (res.connected) {
-        setRdPassword('')
+        setTokenV2('')
         onSettingsUpdate({
           reddit: {
             ...rd,
             connected: true,
-            reddit_username: res.username || rdUsername,
+            reddit_username: res.username || rd.reddit_username,
           },
         })
       }
     } catch (e) {
       try {
-        const resp = await fetch('/api/reddit/login', {
+        const resp = await fetch('/api/reddit/cookie', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: uid, username: rdUsername, password: rdPassword }),
+          body: JSON.stringify({ user_id: uid, reddit_session: redditSession, token_v2: tokenV2 }),
         })
         const data = await resp.json()
         setLoginError(data.error || 'Login failed')
@@ -76,6 +77,8 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
     }
     setConnecting(false)
   }
+
+  useEffect(() => { (async () => { try { const st = await api.get(`/api/reddit/check/${uid}`); setStatus(!!st.connected) } catch {} })() }, [uid])
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
@@ -112,7 +115,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
           <h1 className="text-xl font-bold tracking-tight">Reddit</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Engagement settings</p>
         </div>
-        {rd.connected ? (
+        {status ? (
           <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
             ● Connected
           </span>
@@ -125,7 +128,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
 
       {/* Connection Card */}
       <Section title="Account" subtitle={rd.connected ? `Logged in as u/${rd.reddit_username || '...'}` : 'Connect your Reddit account'}>
-        {rd.connected ? (
+        {status ? (
           <div className="card flex items-center justify-between py-3">
             <div className="flex items-center gap-2">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="#FF4500">
@@ -156,18 +159,18 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
             <input
               type="text"
               className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-              placeholder="Reddit username"
-              value={rdUsername}
-              onChange={e => setRdUsername(e.target.value)}
+              placeholder="reddit_session"
+              value={redditSession}
+              onChange={e => setRedditSession(e.target.value)}
               style={{ borderColor: '#ddd' }}
               autoComplete="username"
             />
             <input
               type="password"
               className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-              placeholder="Password"
-              value={rdPassword}
-              onChange={e => setRdPassword(e.target.value)}
+              placeholder="token_v2"
+              value={tokenV2}
+              onChange={e => setTokenV2(e.target.value)}
               style={{ borderColor: '#ddd' }}
               autoComplete="current-password"
               onKeyDown={e => e.key === 'Enter' && handleConnect()}
@@ -176,7 +179,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
               <p className="text-xs mb-1" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
             )}
             <p className="text-[11px] mb-3" style={{ color: 'var(--color-muted)' }}>
-              Tip: API error 400 usually means invalid credentials or Reddit requested an extra verification step.
+              Open reddit.com in browser → F12 → Application → Cookies → copy reddit_session and token_v2
             </p>
             <button
               className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"

@@ -50,11 +50,21 @@ async def _build_client(user_id: str):
         check_for_async=False,
     )
 
+def _load_credentials(user_id: str) -> dict:
+    p = _creds_path(user_id)
+    if not p.exists(): return {}
+    try: return json.loads(p.read_text(encoding="utf-8"))
+    except Exception: return {}
 
 async def _verify_client(client):
     me = await client.user.me()
     return me.name if me else ""
 
+def _load_cookies(user_id: str) -> dict:
+    p = reddit_cookies_path(user_id)
+    if not p.exists(): return {}
+    try: return json.loads(p.read_text(encoding="utf-8"))
+    except Exception: return {}
 
 def check_login(user_id: str) -> bool:
     async def _inner():

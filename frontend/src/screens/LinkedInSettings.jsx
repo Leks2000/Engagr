@@ -19,11 +19,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [dirty, setDirty] = useState(false)
 
   // Login form
-  const [liEmail, setLiEmail] = useState('')
-  const [liPassword, setLiPassword] = useState('')
+  const [liAt, setLiAt] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [status, setStatus] = useState(li.connected)
 
   const save = () => {
     onSettingsUpdate({
@@ -43,42 +43,26 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const markDirty = () => setDirty(true)
 
   const handleConnect = async () => {
-    if (!liEmail || !liPassword) {
-      setLoginError('Enter email and password')
-      return
-    }
     setConnecting(true)
     setLoginError('')
     try {
-      const res = await api.post('/api/linkedin/login', {
-        user_id: uid,
-        email: liEmail,
-        password: liPassword,
-      })
-      if (res.connected) {
-        setLiPassword('')
-        onSettingsUpdate({
-          linkedin: {
-            ...li,
-            connected: true,
-          },
-        })
-      }
-    } catch (e) {
-      try {
-        const resp = await fetch('/api/linkedin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: uid, email: liEmail, password: liPassword }),
-        })
-        const data = await resp.json()
-        setLoginError(data.error || 'Login failed')
-      } catch {
-        setLoginError(e.message || 'Login failed')
-      }
-    }
+      const res = await api.get(`/api/linkedin/auth/${uid}`)
+      window.Telegram?.WebApp?.openLink?.(res.url)
+    } catch (e) { setLoginError(e.message || 'Failed to start OAuth') }
     setConnecting(false)
   }
+
+  const handleCookieConnect = async () => {
+    if (!liAt) { setLoginError('Enter li_at cookie'); return }
+    setConnecting(true); setLoginError('')
+    try {
+      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt })
+      if (res.connected) { setStatus(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
+    } catch (e) { setLoginError('Cookie login failed') }
+    setConnecting(false)
+  }
+
+  useEffect(() => { (async () => { try { const st = await api.get(`/api/linkedin/check/${uid}`); setStatus(!!st.connected) } catch {} })() }, [uid])
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
@@ -114,7 +98,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Engagement settings</p>
         </div>
-        {li.connected ? (
+        {status ? (
           <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
             ● Connected
           </span>
@@ -127,7 +111,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
       {/* Account Section */}
       <Section title="Account" subtitle={li.connected ? 'Session active' : 'Connect your LinkedIn account'}>
-        {li.connected ? (
+        {status ? (
           <div className="card flex items-center justify-between py-3">
             <div className="flex items-center gap-2">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -145,6 +129,8 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             >
               {disconnecting ? 'Disconnecting...' : 'Disconnect'}
             </button>
+            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
+            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         ) : (
           <div className="card">
@@ -156,24 +142,15 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               </div>
             </div>
             <input
-              type="email"
+              type="text"
               className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-              placeholder="LinkedIn email"
-              value={liEmail}
-              onChange={e => setLiEmail(e.target.value)}
+              placeholder="li_at cookie value"
+              value={liAt}
+              onChange={e => setLiAt(e.target.value)}
               style={{ borderColor: '#ddd' }}
               autoComplete="email"
             />
-            <input
-              type="password"
-              className="w-full px-4 py-3 border rounded-xl text-sm outline-none mb-3"
-              placeholder="Password"
-              value={liPassword}
-              onChange={e => setLiPassword(e.target.value)}
-              style={{ borderColor: '#ddd' }}
-              autoComplete="current-password"
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
-            />
+
             {loginError && (
               <p className="text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
             )}
@@ -199,10 +176,12 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                     <rect x="2" y="9" width="4" height="12" />
                     <circle cx="4" cy="4" r="2" />
                   </svg>
-                  Connect LinkedIn
+                  Connect via LinkedIn
                 </>
               )}
             </button>
+            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
+            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         )}
       </Section>
@@ -300,6 +279,8 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               style={{ borderColor: '#ddd' }}
             />
             <button className="btn btn-sm" onClick={addSessionTime}>Add</button>
+            <p className="text-xs mt-3 mb-2" style={{ color: "var(--color-muted)" }}>Or enter cookie manually:</p>
+            <button className="w-full py-2 rounded-xl text-sm" style={{ border: "1px solid #ddd" }} onClick={handleCookieConnect}>Enter cookie manually</button>
           </div>
         )}
       </Section>
