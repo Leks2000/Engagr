@@ -208,6 +208,34 @@ input[type="range"]::-moz-range-thumb {
   animation: slideUp 0.4s ease forwards;
 }
 
+.oauth-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.oauth-modal {
+  width: min(560px, 100%);
+  height: min(88vh, 740px);
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.2);
+}
+
+.oauth-frame {
+  width: 100%;
+  height: calc(100% - 32px);
+  border: none;
+  border-radius: 10px;
+  background: #fff;
+}
+
 /* ── Nav ─────────────────────────────────────── */
 .nav-item {
   display: flex;

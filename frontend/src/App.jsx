@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
@@ -40,16 +40,27 @@ export const api = {
   },
 }
 
+
+
+export const translations = {
+  en: { dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue' },
+  ru: { dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь' },
+  es: { dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola' },
+  de: { dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange' },
+}
+
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon },
-  { id: 'linkedin', label: 'LinkedIn', icon: LinkedInIcon },
-  { id: 'reddit', label: 'Reddit', icon: RedditIcon },
-  { id: 'queue', label: 'Queue', icon: QueueIcon },
+  { id: 'dashboard', labelKey: 'dashboard', icon: DashboardIcon },
+  { id: 'linkedin', labelKey: 'linkedin', icon: LinkedInIcon },
+  { id: 'reddit', labelKey: 'reddit', icon: RedditIcon },
+  { id: 'queue', labelKey: 'queue', icon: QueueIcon },
 ]
 
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
+  const language = settings?.language || 'en'
+  const t = useMemo(() => translations[language] || translations.en, [language])
   const [webAppReady, setWebAppReady] = useState(!window.Telegram?.WebApp)
 
   useEffect(() => {
@@ -119,7 +130,7 @@ function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-1" style={{ borderColor: '#e5e7eb' }}>
-        {NAV_ITEMS.map(item => <button key={item.id} className={`nav-item ${screen === item.id ? 'active' : ''}`} onClick={() => setScreen(item.id)}><item.icon /><span>{item.label}</span></button>)}
+        {NAV_ITEMS.map(item => <button key={item.id} className={`nav-item ${screen === item.id ? 'active' : ''}`} onClick={() => setScreen(item.id)}><item.icon /><span>{t[item.labelKey] || item.id}</span></button>)}
       </nav>
       <Analytics />
       <SpeedInsights />
