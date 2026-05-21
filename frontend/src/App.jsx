@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
 import './index.css'
@@ -45,10 +46,22 @@ const NAV_ITEMS = [
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
+  const [webAppReady, setWebAppReady] = useState(!window.Telegram?.WebApp)
 
   useEffect(() => {
-    tg?.expand?.(); tg?.ready?.(); loadSettings()
+    const webApp = window.Telegram?.WebApp
+    if (webApp) {
+      try { webApp.ready?.(); webApp.expand?.() } catch {}
+      setWebAppReady(true)
+    } else {
+      const timer = setTimeout(() => setWebAppReady(true), 500)
+      return () => clearTimeout(timer)
+    }
   }, [])
+
+  useEffect(() => {
+    if (webAppReady) loadSettings()
+  }, [webAppReady, loadSettings])
 
   const loadSettings = useCallback(async () => {
     try {
@@ -70,16 +83,26 @@ function App() {
     }
   }, [])
 
-  if (screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
+  if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
   if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={() => { loadSettings(); setScreen('dashboard') }} />
 
   return (
     <div className="flex flex-col min-h-screen app-shell">
       <main className="flex-1 overflow-y-auto pb-20">
-        {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
-        {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
-        {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
-        {screen === 'queue' && <div className="page-transition"><Queue userId={userId} /></div>}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={screen}
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+          >
+            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+            {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+            {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+            {screen === 'queue' && <div className="page-transition"><Queue userId={userId} /></div>}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-1" style={{ borderColor: '#e5e7eb' }}>
