@@ -8,7 +8,7 @@ const LANGUAGES = [
   { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
 ]
 
-export default function Onboarding({ userId, onComplete }) {
+export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [step, setStep] = useState(0)
   const [language, setLanguage] = useState('en')
 
@@ -71,10 +71,10 @@ export default function Onboarding({ userId, onComplete }) {
     setRdLoading(true)
     setRdError('')
     try {
-      const res = await api.get(`/api/reddit/auth/${userId}`)
-      window.location.href = res.url
+      await api.put(`/api/settings/${userId}`, { onboarding_completed: true })
+      onOpenReddit?.()
     } catch (e) {
-      setRdError(e.message || 'Failed to start Reddit OAuth')
+      setRdError(e.message || 'Failed to open Reddit settings')
     }
     setRdLoading(false)
   }
@@ -214,7 +214,7 @@ export default function Onboarding({ userId, onComplete }) {
       {step === 2 && (
         <div className="flex-1 animate-slide-up">
           <h2 className="text-lg font-semibold mb-1">Connect Reddit</h2>
-          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>Connect your Reddit account with OAuth</p>
+          <p className="text-sm mb-6" style={{ color: 'var(--color-muted)' }}>Connect your Reddit account from settings</p>
 
           {rdConnected ? (
             <div className="card text-center py-8 mb-4">
@@ -255,7 +255,7 @@ export default function Onboarding({ userId, onComplete }) {
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
                       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.8 11.33c.02.16.03.33.03.5 0 2.55-2.97 4.63-6.63 4.63s-6.63-2.07-6.63-4.63c0-.17.01-.34.03-.5A1.45 1.45 0 013.2 12c0-.81.66-1.47 1.47-1.47.39 0 .74.15 1.01.41 1-.72 2.37-1.18 3.9-1.24l.66-3.12.04-.02 2.15.45c.13-.27.4-.46.72-.46a.82.82 0 01.82.82.82.82 0 01-.82.82.82.82 0 01-.73-.45l-1.93-.41-.59 2.79c1.5.07 2.85.53 3.83 1.24.27-.25.62-.41 1.01-.41.81 0 1.47.66 1.47 1.47 0 .56-.31 1.04-.76 1.29z" />
                     </svg>
-                    Connect Reddit
+                    Open Reddit Settings
                   </>
                 )}
               </button>
