@@ -59,10 +59,6 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    if (webAppReady) loadSettings()
-  }, [webAppReady, loadSettings])
-
   const loadSettings = useCallback(async () => {
     try {
       const data = await api.get(`/api/settings/${userId}`)
@@ -74,6 +70,19 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (webAppReady) loadSettings()
+  }, [webAppReady, loadSettings])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('linkedin') === 'connected') {
+      window.history.replaceState({}, '', '/')
+      // Сначала грузим настройки, потом принудительно ставим linkedin
+      loadSettings().then(() => setScreen('linkedin'))
+    }
+  }, [loadSettings])
+    
   const handleSettingsUpdate = useCallback(async (updates) => {
     try {
       await api.put(`/api/settings/${userId}`, updates)
