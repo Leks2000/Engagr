@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import requests
 from linkedin_api import Linkedin
 
 from config import WEBSHARE_PROXY_URL, linkedin_cookies_path
@@ -197,3 +198,70 @@ async def add_connection(_playwright_unused, user_id: str, keywords: list[str]):
     except Exception as e:
         logger.error("LinkedIn add_connection failed user=%s err=%s", user_id, e)
     return False
+
+
+def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -> list[dict]:
+    auth = _load_auth(user_id)
+    token = auth.get("access_token")
+    if not token:
+        return []
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
+    try:
+        resp = requests.get(
+            "https://api.linkedin.com/v2/ugcPosts",
+            headers=headers,
+            params={"q": "authors", "count": 50},
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return []
+    except Exception:
+        return []
+
+    posts = []
+    for item in resp.json().get("elements", []):
+        text = (
+            item.get("specificContent", {})
+            .get("com.linkedin.ugc.ShareContent", {})
+            .get("shareCommentary", {})
+            .get("text", "")
+        )
+        if not text:
+            continue
+        if keywords and not any(k.lower() in text.lower() for k in keywords):
+            continue
+        post_id = item.get("id", "")
+        posts.append({
+            "id": post_id,
+            "text": text[:1000],
+            "excerpt": text[:200],
+            "url": f"https://www.linkedin.com/feed/update/{post_id}",
+            "platform": "linkedin",
+        })
+    return posts[:max_posts]
+
+
+def get_profile_picture(user_id: str) -> str:
+    auth = _load_auth(user_id)
+    token = auth.get("access_token")
+    if not token:
+        return ""
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        resp = requests.get(
+            "https://api.linkedin.com/v2/me?projection=(id,profilePicture(displayImage~:playableStreams))",
+            headers=headers,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+        elements = data["profilePicture"]["displayImage~"]["elements"]
+        return elements[-1]["identifiers"][0]["identifier"]
+    except Exception:
+        return ""

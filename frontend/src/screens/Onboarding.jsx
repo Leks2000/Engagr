@@ -59,7 +59,11 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     setLiError('')
     try {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
-      window.location.href = res.url
+      if (window.Telegram?.WebApp?.openLink) {
+        window.Telegram.WebApp.openLink(res.url)
+      } else {
+        window.location.href = res.url
+      }
     } catch (e) {
       setLiError(e.message || 'Failed to start LinkedIn OAuth')
     }

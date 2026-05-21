@@ -9,6 +9,7 @@ import asyncio
 import logging
 import threading
 import requests
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -352,45 +353,39 @@ def linkedin_profile(user_id):
         auth = linkedin._load_auth(user_id)
         token = auth.get("access_token", "")
         if not token:
-            return jsonify({"connected": False})
+            return jsonify({"connected": False, "name": "", "headline": "", "email": "", "picture_url": ""})
 
         headers = {"Authorization": f"Bearer {token}"}
-        me = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
-        if me.status_code != 200:
-            return jsonify({"connected": False})
-        me_data = me.json()
+        me_resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
+        if me_resp.status_code != 200:
+            return jsonify({"connected": False, "name": "", "headline": "", "email": "", "picture_url": ""})
 
+        me_data = me_resp.json()
         email_resp = requests.get(
             "https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))",
             headers=headers,
             timeout=20,
         )
+
         email = ""
         if email_resp.status_code == 200:
             email_data = email_resp.json()
             email = (((email_data.get("elements") or [{}])[0]).get("handle~") or {}).get("emailAddress", "")
 
-        first_name = ((me_data.get("localizedFirstName") or "").strip())
-        last_name = ((me_data.get("localizedLastName") or "").strip())
+        first_name = (me_data.get("localizedFirstName") or "").strip()
+        last_name = (me_data.get("localizedLastName") or "").strip()
         full_name = f"{first_name} {last_name}".strip()
-        profile_picture_url = ""
-        display_image = ((me_data.get("profilePicture") or {}).get("displayImage~") or {})
-        elements = display_image.get("elements") or []
-        if elements:
-            identifiers = elements[-1].get("identifiers") or []
-            if identifiers:
-                profile_picture_url = identifiers[0].get("identifier", "")
 
         return jsonify({
             "connected": True,
             "name": full_name,
             "headline": me_data.get("headline", ""),
-            "profile_picture_url": profile_picture_url,
             "email": email,
+            "picture_url": linkedin.get_profile_picture(user_id),
         })
     except Exception as e:
         logger.error(f"linkedin profile fetch failed user={user_id}: {e}")
-        return jsonify({"connected": False})
+        return jsonify({"connected": False, "name": "", "headline": "", "email": "", "picture_url": ""})
 
 
 @api.route("/api/linkedin/cookie", methods=["POST"])
@@ -417,6 +412,11 @@ def linkedin_check(user_id):
     return jsonify({"connected": connected})
 
 
+@api.route("/api/reddit/auth/<user_id>", methods=["GET"])
+def reddit_auth(user_id):
+    return jsonify({"error": "Reddit OAuth not implemented", "url": ""}), 501
+
+
 @api.route("/api/reddit/cookie", methods=["POST"])
 def reddit_cookie():
     import reddit_bot
@@ -440,6 +440,46 @@ def reddit_check(user_id):
     connected = reddit_bot.check_login(user_id)
     storage.update_settings(user_id, {"reddit": {"connected": connected}})
     return jsonify({"connected": connected})
+
+
+@api.route("/api/session/run/<user_id>", methods=["POST"])
+def run_session_now(user_id):
+    import linkedin
+    import ai_comment
+
+    try:
+        settings = storage.get_settings(user_id)
+        li_cfg = settings.get("linkedin", {})
+        keywords = li_cfg.get("keywords", []) or []
+        max_posts = li_cfg.get("comments_per_day", 5)
+
+        posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
+        queued = 0
+        now = datetime.now(timezone.utc).isoformat()
+
+        for post in posts:
+            post_text = post.get("text", "")
+            if not post_text:
+                continue
+            comment = ai_comment.generate_comment(post_text, "linkedin")
+            item_id = f"li_{post.get('id', queued)}_{queued}"
+            storage.add_to_queue(user_id, {
+                "id": item_id,
+                "platform": "linkedin",
+                "post_id": post.get("id", ""),
+                "post_url": post.get("url", ""),
+                "post_text": post_text,
+                "excerpt": post.get("excerpt", ""),
+                "comment": comment,
+                "status": "pending",
+                "created_at": now,
+            })
+            queued += 1
+
+        return jsonify({"queued": queued})
+    except Exception as e:
+        logger.error("manual session run failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Background Posting ────────────────────────────────
