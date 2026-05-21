@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "pip install -r requirements.txt && playwright install chromium"
+buildCommand = "cd backend && pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium"
 
 [deploy]
 startCommand = "cd backend && python main.py"
@@ -9,4 +9,4 @@ healthcheckTimeout = 300
 restartPolicyType = "always"
 
 [nixpacks]
-aptPkgs = ["libnss3", "libatk1.0-0", "libatk-bridge2.0-0", "libcups2", "libxcomposite1", "libxdamage1", "libxrandr2", "libgbm1", "libpango-1.0-0", "libcairo2", "libasound2", "libxshmfence1"]
+aptPkgs = ["libnss3", "libatk1.0-0t64", "libatk-bridge2.0-0t64", "libcups2t64", "libxcomposite1", "libxdamage1", "libxrandr2", "libgbm1", "libpango-1.0-0", "libcairo2", "libasound2t64", "libxshmfence1", "libxkbcommon0", "libdrm2"]
