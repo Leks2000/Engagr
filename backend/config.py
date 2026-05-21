@@ -31,6 +31,13 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_REDIRECT_URI = os.getenv("REDDIT_REDIRECT_URI", "")
 
+
+# ── LinkedIn OAuth / Proxy ─────────────────────────
+LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "864tm25k93bj1r")
+LINKEDIN_CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET", "")
+LINKEDIN_REDIRECT_URI = os.getenv("LINKEDIN_REDIRECT_URI", "https://engagr-production.up.railway.app/api/linkedin/callback")
+WEBSHARE_PROXY_URL = os.getenv("WEBSHARE_PROXY_URL", "")
+
 # ── App ───────────────────────────────────────────────
 APP_ENV = os.getenv("APP_ENV", "development")
 MINI_APP_URL = os.getenv("MINI_APP_URL", "")
