@@ -1,9 +1,4 @@
-"""
-Engagr — Reddit Automation via Cookie Session
-Handles: post scraping, commenting, and upvoting.
-Uses saved browser cookies — no Reddit app / OAuth required.
-Playwright logs in once → cookies saved → requests.Session for everything.
-"""
+"""Engagr — Reddit automation via OAuth2 + requests (no browser)."""
 
 import json
 import random
@@ -40,9 +35,7 @@ def _get_session(user_id: str) -> http_requests.Session | None:
         return None
 
     session = http_requests.Session()
-    session.headers.update({
-        "User-Agent": _USER_AGENT,
-    })
+    session.headers.update({"User-Agent": _USER_AGENT})
 
     for c in cookies_list:
         session.cookies.set(
@@ -54,16 +47,6 @@ def _get_session(user_id: str) -> http_requests.Session | None:
     return session
 
 
-def _get_modhash(session: http_requests.Session) -> str:
-    """Fetch modhash (CSRF token) required for POST requests."""
-    try:
-        resp = session.get("https://www.reddit.com/api/me.json", timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("data", {}).get("modhash", "")
-    except Exception as e:
-        logger.error(f"Failed to get modhash: {e}")
-    return ""
 
 
 def check_login(user_id: str) -> bool:
@@ -72,10 +55,12 @@ def check_login(user_id: str) -> bool:
     if not session:
         return False
     try:
-        resp = session.get("https://www.reddit.com/api/me.json", timeout=15)
+        token = session.cookies.get("oauth_token")
+        headers = {"Authorization": f"bearer {token}", "User-Agent": _USER_AGENT}
+        resp = session.get("https://oauth.reddit.com/api/v1/me", headers=headers, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
-            name = data.get("data", {}).get("name", "")
+            name = data.get("name", "")
             return bool(name)
     except Exception as e:
         logger.error(f"Reddit login check failed: {e}")
@@ -85,74 +70,42 @@ def check_login(user_id: str) -> bool:
 # ── Playwright Login (one-time) ──────────────────────
 
 def login_with_playwright(user_id: str, username: str, password: str) -> tuple[bool, str]:
-    """
-    Use Playwright (sync) to log in to Reddit and save cookies.
-    Called from the Flask API endpoint.
-    Returns (success, error_message).
-    """
-    from playwright.sync_api import sync_playwright
-
-    cpath = reddit_cookies_path(user_id)
-    cpath.parent.mkdir(parents=True, exist_ok=True)
-
+    """Backward-compatible name; now performs OAuth2 password grant login."""
+    session = http_requests.Session()
+    session.headers.update({"User-Agent": _USER_AGENT})
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            context = browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent=_USER_AGENT,
-            )
-            page = context.new_page()
+        resp = session.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=http_requests.auth.HTTPBasicAuth("", ""),
+            data={
+                "grant_type": "password",
+                "username": username,
+                "password": password,
+                "scope": "identity history read submit vote",
+            },
+            headers={"User-Agent": _USER_AGENT},
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return False, "Login failed — check credentials"
+        token = resp.json().get("access_token")
+        if not token:
+            return False, "Login failed — no access token"
 
-            # Go to Reddit login
-            page.goto("https://www.reddit.com/login", wait_until="domcontentloaded", timeout=30000)
-            time.sleep(2)
+        # Fetch username from OAuth API
+        oauth_headers = {"Authorization": f"bearer {token}", "User-Agent": _USER_AGENT}
+        me = session.get("https://oauth.reddit.com/api/v1/me", headers=oauth_headers, timeout=15)
+        if me.status_code != 200:
+            return False, "Login failed — unable to fetch profile"
+        reddit_name = me.json().get("name", username)
 
-            # Fill credentials
-            page.fill('input[name="username"]', username)
-            page.fill('input[name="password"]', password)
-            time.sleep(0.5)
-
-            # Submit
-            page.click('button[type="submit"]')
-            time.sleep(5)
-
-            # Check result
-            current_url = page.url
-            if "/login" in current_url:
-                # Try the new Reddit login form (different selectors)
-                try:
-                    error_el = page.query_selector('[class*="error"], [class*="Error"]')
-                    error_text = error_el.inner_text() if error_el else ""
-                except Exception:
-                    error_text = ""
-                browser.close()
-                return False, error_text or "Login failed — check credentials"
-
-            # Save cookies
-            cookies = context.cookies()
-            cpath.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
-
-            # Get username to confirm
-            reddit_name = ""
-            try:
-                page.goto("https://www.reddit.com/api/me.json", wait_until="domcontentloaded", timeout=15000)
-                time.sleep(1)
-                body = page.inner_text("body")
-                me_data = json.loads(body)
-                reddit_name = me_data.get("data", {}).get("name", "")
-            except Exception:
-                reddit_name = username
-
-            browser.close()
-            logger.info(f"Reddit login OK for user {user_id} as u/{reddit_name}")
-            return True, reddit_name
-
+        cpath = reddit_cookies_path(user_id)
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(json.dumps([{"name": "oauth_token", "value": token, "domain": "oauth.reddit.com", "path": "/"}], indent=2), encoding="utf-8")
+        logger.info(f"Reddit login OK for user {user_id} as u/{reddit_name}")
+        return True, reddit_name
     except Exception as e:
-        logger.error(f"Reddit Playwright login error: {e}")
+        logger.error(f"Reddit OAuth login error: {e}")
         return False, str(e)
 
 
@@ -177,14 +130,15 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
         return []
 
     posts = []
-    headers = {"User-Agent": _USER_AGENT}
+    token = session.cookies.get("oauth_token")
+    headers = {"User-Agent": _USER_AGENT, "Authorization": f"bearer {token}"}
 
     for sub_name in subreddits:
         try:
             if keywords:
                 for keyword in keywords[:3]:
                     url = (
-                        f"https://www.reddit.com/r/{sub_name}/search.json"
+                        f"https://oauth.reddit.com/r/{sub_name}/search"
                         f"?q={keyword}&sort=new&t=day&restrict_sr=on&limit=5"
                     )
                     try:
@@ -200,7 +154,7 @@ def scrape_posts(user_id: str, max_posts: int = 10) -> list[dict]:
                     except Exception as e:
                         logger.debug(f"Search error in r/{sub_name}: {e}")
             else:
-                url = f"https://www.reddit.com/r/{sub_name}/hot.json?limit=10"
+                url = f"https://oauth.reddit.com/r/{sub_name}/hot?limit=10"
                 resp = session.get(url, headers=headers, timeout=15)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -284,7 +238,7 @@ def post_comment(user_id: str, reddit_id: str, comment: str) -> bool:
 
     try:
         resp = session.post(
-            "https://www.reddit.com/api/comment",
+            "https://oauth.reddit.com/api/comment",
             data={
                 "thing_id": f"t3_{reddit_id}",
                 "text": comment,
@@ -323,7 +277,7 @@ def upvote_post(user_id: str, reddit_id: str) -> bool:
 
     try:
         resp = session.post(
-            "https://www.reddit.com/api/vote",
+            "https://oauth.reddit.com/api/vote",
             data={
                 "id": f"t3_{reddit_id}",
                 "dir": 1,

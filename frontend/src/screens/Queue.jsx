@@ -77,8 +77,8 @@ export default function Queue({ userId }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading queue...</div>
+      <div className="space-y-3 px-5 pt-6">
+        {[1,2,3].map(i => <div key={i} className="queue-skeleton" />)}
       </div>
     )
   }
@@ -99,12 +99,10 @@ export default function Queue({ userId }) {
       </div>
 
       {queue.length === 0 ? (
-        <div className="text-center py-16">
-          <div className="text-4xl mb-3">📭</div>
-          <p className="text-sm font-medium mb-1">Queue is empty</p>
-          <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-            New comments will appear here during sessions
-          </p>
+        <div className="text-center py-16 empty-state">
+          <div className="empty-illu">🧠💬</div>
+          <p className="text-base font-semibold mb-1">No items in review queue</p>
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>New AI drafts will appear here after the next scheduled session.</p>
         </div>
       ) : (
         <div className="space-y-4">

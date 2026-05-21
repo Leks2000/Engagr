@@ -178,7 +178,7 @@ def resume_session(user_id):
 
 @api.route("/api/linkedin/login", methods=["POST"])
 def linkedin_login():
-    """Login to LinkedIn using email/password via Playwright."""
+    """Login to LinkedIn using email/password via linkedin-api."""
     import linkedin
 
     try:
@@ -199,6 +199,8 @@ def linkedin_login():
             sched_module.schedule_user_sessions(user_id)
             return jsonify({"status": "ok", "connected": True})
         else:
+            if msg == "verification_required":
+                return jsonify({"error": "verification_required"}), 401
             return jsonify({"error": msg or "Login failed"}), 400
 
     except Exception as e:
@@ -240,7 +242,7 @@ def linkedin_disconnect(user_id):
 
 @api.route("/api/reddit/login", methods=["POST"])
 def reddit_login():
-    """Login to Reddit using username/password via Playwright."""
+    """Login to Reddit using OAuth2 password grant HTTP requests."""
     import reddit_bot
 
     try:
@@ -252,7 +254,6 @@ def reddit_login():
         if not user_id or not username or not password:
             return jsonify({"error": "user_id, username, and password are required"}), 400
 
-        # Run Playwright sync login (blocks this request, ~10s)
         success, result = reddit_bot.login_with_playwright(user_id, username, password)
 
         if success:
@@ -381,14 +382,6 @@ async def main():
     # Start scheduler
     sched_module.start_scheduler()
 
-    # Initialize Playwright (if available)
-    try:
-        from playwright.async_api import async_playwright
-        pw = await async_playwright().start()
-        sched_module.set_playwright(pw)
-        logger.info("Playwright initialized")
-    except Exception as e:
-        logger.warning(f"Playwright not available: {e}")
 
     # Create and run Telegram bot
     bot_app = telegram_bot.create_bot()
