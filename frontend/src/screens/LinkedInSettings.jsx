@@ -55,7 +55,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     setLoginError('')
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
-      window.location.href = res.url
+      if (window.Telegram?.WebApp?.openLink) {
+        window.Telegram.WebApp.openLink(res.url)
+      } else {
+        window.location.href = res.url
+      }
       
       // Поллим статус каждые 2 сек пока не подключится
       const poll = setInterval(async () => {
@@ -94,6 +98,25 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   useEffect(() => {
     setStatus(!!(settings?.linkedin?.connected))
   }, [settings])
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!status) {
+        setProfile(null)
+        return
+      }
+      setProfileLoading(true)
+      try {
+        const data = await api.get(`/api/linkedin/profile/${uid}`)
+        setProfile(data?.connected ? data : null)
+      } catch {
+        setProfile(null)
+      } finally {
+        setProfileLoading(false)
+      }
+    }
+    loadProfile()
+  }, [status, uid])
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
@@ -185,7 +208,27 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                 <rect x="2" y="9" width="4" height="12" />
                 <circle cx="4" cy="4" r="2" />
               </svg>
-              <span className="text-sm font-medium">LinkedIn Connected</span>
+              <div>
+                <span className="text-sm font-medium">LinkedIn Connected</span>
+                {profileLoading ? (
+                  <p className="text-xs" style={{ color: "var(--color-muted)" }}>Loading profile...</p>
+                ) : profile ? (
+                  <div className="mt-2 flex items-center gap-3">
+                    {profile.picture_url ? (
+                      <img src={profile.picture_url} alt={profile.name || "LinkedIn"} className="w-10 h-10 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "#e3f2fd", color: "#0A66C2" }}>
+                        {(profile.name || "LI").split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-sm font-bold">{profile.name || "LinkedIn User"}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>{profile.headline || ""}</p>
+                      <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>{profile.email || ""}</p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <button
               className="text-xs px-3 py-1.5 rounded-lg mt-3"

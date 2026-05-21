@@ -4,6 +4,7 @@ import { api } from '../App'
 export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState('')
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
@@ -17,14 +18,33 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate }) {
     try { await api.post(`/api/session/${uid}/${isActive ? 'pause' : 'resume'}`); onSettingsUpdate({ session_active: !isActive }) } catch (err) { console.error('Failed to toggle session:', err) }
   }
 
+  const runTestSession = async () => {
+    try {
+      const res = await api.post(`/api/session/run/${uid}`)
+      const msg = `Queued ${res?.queued || 0} comments — check Queue tab`
+      setToast(msg)
+      setTimeout(() => setToast(''), 3000)
+    } catch (err) {
+      setToast('Failed to run test session')
+      setTimeout(() => setToast(''), 3000)
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading stats...</div></div>
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <div><h1 className="text-xl font-bold tracking-tight">Dashboard</h1><p className="text-xs" style={{ color: 'var(--color-muted)' }}>Today · Engagement performance</p></div>
-        <button className="btn btn-sm" onClick={toggleSession}><span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>{isActive ? 'Active' : 'Paused'}</button>
+        <div className="flex gap-2">
+          <button className="btn btn-sm" onClick={runTestSession}>Run Test Session</button>
+          <button className="btn btn-sm" onClick={toggleSession}><span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>{isActive ? 'Active' : 'Paused'}</button>
+        </div>
       </div>
+
+      {toast && (
+        <div className="card mb-4 text-sm" style={{ background: "#e8f5e9", color: "#1b5e20" }}>{toast}</div>
+      )}
 
       <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
         <div className="grid grid-cols-2 gap-3">
