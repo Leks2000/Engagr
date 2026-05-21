@@ -9,6 +9,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -309,6 +310,87 @@ def reddit_disconnect(user_id):
         return jsonify({"status": "disconnected"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/linkedin/auth/<user_id>", methods=["GET"])
+def linkedin_auth(user_id):
+    from config import LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI
+    params = urlencode({"response_type": "code", "client_id": LINKEDIN_CLIENT_ID, "redirect_uri": LINKEDIN_REDIRECT_URI, "state": user_id, "scope": "openid profile email w_member_social"})
+    return jsonify({"url": f"https://www.linkedin.com/oauth/v2/authorization?{params}"})
+
+
+@api.route("/api/linkedin/callback", methods=["GET"])
+def linkedin_callback():
+    import linkedin
+    from config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI, MINI_APP_URL
+    code = request.args.get("code", "")
+    user_id = request.args.get("state", "")
+    if not code or not user_id:
+        return jsonify({"error": "code and state are required"}), 400
+    try:
+        import requests
+        resp = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={"grant_type": "authorization_code", "code": code, "redirect_uri": LINKEDIN_REDIRECT_URI, "client_id": LINKEDIN_CLIENT_ID, "client_secret": LINKEDIN_CLIENT_SECRET}, timeout=20)
+        data = resp.json()
+        token = data.get("access_token", "")
+        if not token:
+            return jsonify({"error": "token_exchange_failed", "details": data}), 400
+        linkedin._save_auth(user_id, {"auth_method": "oauth2", "access_token": token, "raw": data})
+        storage.update_settings(user_id, {"linkedin": {"connected": True}})
+        if MINI_APP_URL:
+            from flask import redirect
+            return redirect(MINI_APP_URL)
+        return jsonify({"status": "ok", "connected": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/linkedin/cookie", methods=["POST"])
+def linkedin_cookie():
+    import linkedin
+    data = request.get_json() or {}
+    user_id = data.get("user_id", "")
+    li_at = data.get("li_at", "")
+    if not user_id or not li_at:
+        return jsonify({"error": "user_id and li_at are required"}), 400
+    ok = linkedin.verify_li_at(user_id, li_at)
+    if ok:
+        storage.update_settings(user_id, {"linkedin": {"connected": True}})
+        return jsonify({"connected": True})
+    return jsonify({"connected": False, "error": "invalid_cookie"}), 400
+
+
+@api.route("/api/linkedin/check/<user_id>", methods=["GET"])
+def linkedin_check(user_id):
+    import linkedin
+    connected = asyncio.run(linkedin.check_login(user_id=user_id))
+    storage.update_settings(user_id, {"linkedin": {"connected": connected}})
+    return jsonify({"connected": connected})
+
+
+@api.route("/api/reddit/cookie", methods=["POST"])
+def reddit_cookie():
+    import reddit_bot
+    data = request.get_json() or {}
+    user_id = data.get("user_id", "")
+    rs = data.get("reddit_session", "")
+    tv2 = data.get("token_v2", "")
+    if not user_id or not rs or not tv2:
+        return jsonify({"error": "user_id, reddit_session and token_v2 are required"}), 400
+    ok, name = reddit_bot.verify_cookie_login(user_id, rs, tv2)
+    if ok:
+        storage.update_settings(user_id, {"reddit": {"connected": True, "reddit_username": name}})
+        return jsonify({"connected": True, "username": name})
+    return jsonify({"connected": False, "error": "invalid_cookies"}), 400
+
+
+@api.route("/api/reddit/check/<user_id>", methods=["GET"])
+def reddit_check(user_id):
+    import reddit_bot
+    connected = reddit_bot.check_login(user_id)
+    settings = storage.get_settings(user_id)
+    username = settings.get("reddit", {}).get("reddit_username", "")
+    storage.update_settings(user_id, {"reddit": {"connected": connected}})
+    return jsonify({"connected": connected, "username": username})
 
 
 # ── Background Posting ────────────────────────────────
