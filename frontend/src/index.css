@@ -681,3 +681,43 @@ input[type="range"]::-moz-range-thumb {
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+.queue-filter-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.18s ease;
+}
+
+.queue-filter-btn[data-active="true"] {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.queue-filter-btn[data-active="true"][data-kind="all"] {
+  background: #0f172a;
+  border-color: #0f172a;
+}
+
+.queue-filter-btn[data-active="true"][data-kind="linkedin"] {
+  background: #0A66C2;
+  border-color: #0A66C2;
+}
+
+.queue-filter-btn[data-active="true"][data-kind="reddit"] {
+  background: #ff4500;
+  border-color: #ff4500;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-pop-in {
+  animation: popIn 0.25s ease both;
+}
