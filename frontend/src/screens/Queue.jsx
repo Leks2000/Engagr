@@ -2,20 +2,33 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../App'
 import Card from '../components/Card'
 
-export default function Queue({ userId }) {
+const QUEUE_I18N = {
+  en: { title: 'Review Queue', pending: 'pending comments', emptyTitle: 'Nothing to review yet', emptyHint: 'Run a session from Dashboard to generate AI comments.', refresh: 'Refresh', updating: 'Updating', last: 'Last updated' },
+  ru: { title: 'Очередь на проверку', pending: 'комментариев в ожидании', emptyTitle: 'Пока нет комментариев на проверку', emptyHint: 'Запустите сессию на главной, чтобы сгенерировать AI-комментарии.', refresh: 'Обновить', updating: 'Обновление', last: 'Обновлено' },
+  es: { title: 'Cola de revisión', pending: 'comentarios pendientes', emptyTitle: 'Aún no hay elementos para revisar', emptyHint: 'Ejecuta una sesión desde Panel para generar comentarios de IA.', refresh: 'Actualizar', updating: 'Actualizando', last: 'Última actualización' },
+  de: { title: 'Prüfwarteschlange', pending: 'ausstehende Kommentare', emptyTitle: 'Noch keine Elemente zur Prüfung', emptyHint: 'Starte eine Sitzung im Dashboard, um KI-Kommentare zu erzeugen.', refresh: 'Aktualisieren', updating: 'Aktualisiert', last: 'Zuletzt aktualisiert' },
+}
+
+export default function Queue({ userId, language = 'en' }) {
   const [queue, setQueue] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
+  const t = QUEUE_I18N[language] || QUEUE_I18N.en
 
   const loadQueue = useCallback(async () => {
+    if (!loading) setRefreshing(true)
     try {
       const data = await api.get(`/api/queue/${userId}`)
       setQueue(data)
+      setLastUpdated(new Date())
     } catch (err) {
       console.error('Failed to load queue:', err)
     }
     setLoading(false)
+    setRefreshing(false)
   }, [userId])
 
   useEffect(() => {
@@ -107,22 +120,25 @@ export default function Queue({ userId }) {
     <div className="px-5 pt-6 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">📋 Queue</h1>
+          <h1 className="text-xl font-bold tracking-tight queue-title-animate">🗂️ {t.title}</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-            {queue.length} pending comment{queue.length !== 1 ? 's' : ''}
+            {queue.length} {t.pending}
+          </p>
+          <p className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>
+            {refreshing ? `⏳ ${t.updating}...` : `${t.last}: ${lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}`}
           </p>
         </div>
         <button className="btn btn-sm" onClick={loadQueue}>
-          ↻ Refresh
+          ↻ {t.refresh}
         </button>
       </div>
 
       {queue.length === 0 ? (
         <div className="text-center py-16 empty-state">
-          <div className="empty-illu">🧠💬</div>
-          <p className="text-base font-semibold mb-1">No items in review queue</p>
+          <div className="empty-illu">🧾✨</div>
+          <p className="text-base font-semibold mb-1">{t.emptyTitle}</p>
           <p className="text-sm" style={{ color: 'var(--color-muted)' }}>
-            Run a session from Dashboard to generate AI comments.
+            {t.emptyHint}
           </p>
         </div>
       ) : (
