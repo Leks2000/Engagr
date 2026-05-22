@@ -13,8 +13,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [language, setLanguage] = useState('')
   const [languageConfirmed, setLanguageConfirmed] = useState(false)
   const [authUrl, setAuthUrl] = useState('')
-  const [authLoading, setAuthLoading] = useState(false)
-  const [authError, setAuthError] = useState('')
+  const [authState, setAuthState] = useState('idle')
   const [proxyInUse, setProxyInUse] = useState('')
 
   const [liLoading, setLiLoading] = useState(false)
@@ -74,8 +73,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
       setAuthUrl(res.url)
       setProxyInUse(res.proxy || '')
-      setAuthLoading(true)
-      setAuthError('')
+      setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
     } catch (e) {
       setLiError(e.message || 'Failed to start LinkedIn OAuth')
@@ -121,6 +119,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
         if (st.connected) {
           setLiConnected(true)
           setAuthUrl('')
+          setAuthState('success')
           setStep(2)
         }
       } catch {}
@@ -137,20 +136,10 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
               <p className="text-sm font-semibold">LinkedIn authorization</p>
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
-            <div className="oauth-hint">If LinkedIn blocks embedded auth, continue in the opened browser tab.</div>
+            <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
             {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
-            {authLoading && <div className="oauth-status">Loading LinkedIn authorization…</div>}
-            {authError && <div className="oauth-status oauth-status-error">{authError}</div>}
-            <iframe
-              title="LinkedIn OAuth"
-              src={authUrl}
-              className="oauth-frame"
-              onLoad={() => setAuthLoading(false)}
-              onError={() => {
-                setAuthLoading(false)
-                setAuthError('Unable to load inside modal. Continue using external browser sign-in.')
-              }}
-            />
+            {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
+            {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
           </div>
         </div>
       )}

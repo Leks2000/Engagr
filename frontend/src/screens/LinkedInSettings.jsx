@@ -33,8 +33,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
   const [authUrl, setAuthUrl] = useState('')
-  const [authLoading, setAuthLoading] = useState(false)
-  const [authError, setAuthError] = useState('')
+  const [authState, setAuthState] = useState('idle')
   const [proxyInUse, setProxyInUse] = useState(li.proxy_url || '')
 
   const save = () => {
@@ -61,8 +60,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       setAuthUrl(res.url)
       setProxyInUse(res.proxy || '')
-      setAuthLoading(true)
-      setAuthError('')
+      setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
       
       // Поллим статус каждые 2 сек пока не подключится
@@ -73,6 +71,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             clearInterval(poll)
             setStatus(true)
             setAuthUrl('')
+            setAuthState('success')
             setConnecting(false)
             onSettingsUpdate({ linkedin: { ...li, connected: true } })
           }
@@ -83,6 +82,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       setTimeout(() => {
         clearInterval(poll)
         setConnecting(false)
+        setAuthState('timeout')
       }, 120000)
   
     } catch (e) {
@@ -195,20 +195,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               <p className="text-sm font-semibold">LinkedIn authorization</p>
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
-            <div className="oauth-hint">If the embedded page is blocked, finish sign-in in the browser tab that opened automatically.</div>
+            <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
             {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
-            {authLoading && <div className="oauth-status">Loading LinkedIn authorization…</div>}
-            {authError && <div className="oauth-status oauth-status-error">{authError}</div>}
-            <iframe
-              title="LinkedIn OAuth"
-              src={authUrl}
-              className="oauth-frame"
-              onLoad={() => setAuthLoading(false)}
-              onError={() => {
-                setAuthLoading(false)
-                setAuthError('Unable to load inside modal. Continue using external browser sign-in.')
-              }}
-            />
+            {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
+            {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
+            {authState === 'timeout' && <div className="oauth-status oauth-status-error">Still waiting. Finish login in the opened tab and retry if needed.</div>}
           </div>
         </div>
       )}
