@@ -380,6 +380,8 @@ input[type="range"]::-moz-range-thumb {
 @keyframes shimmer{to{background-position:-200% 0}}
 .empty-state .empty-illu{font-size:48px;margin-bottom:10px;animation:floaty 2.6s ease-in-out infinite;transform:translate3d(0,0,0);will-change:transform}
 @keyframes floaty{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-6px,0)}}
+.queue-title-animate{display:inline-block;animation:queueTitleIn .45s ease both}
+@keyframes queueTitleIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 
 /* ── Queue Card Styles ────────────────────────── */
 .queue-card {

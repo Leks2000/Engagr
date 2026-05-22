@@ -8,6 +8,7 @@ import sys
 import asyncio
 import logging
 import threading
+import fcntl
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -629,6 +630,24 @@ async def _post_item_delayed(user_id: str, item: dict):
 # ── Main ──────────────────────────────────────────────
 
 _loop = None
+_bot_poll_lock_fp = None
+
+
+def _try_acquire_bot_poll_lock() -> bool:
+    """Prevent multiple app instances from polling Telegram simultaneously."""
+    global _bot_poll_lock_fp
+    lock_path = "/tmp/engagr_telegram_polling.lock"
+    try:
+        fp = open(lock_path, "w")
+        fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fp.write(str(os.getpid()))
+        fp.flush()
+        _bot_poll_lock_fp = fp
+        logger.info("Telegram polling lock acquired path=%s pid=%s", lock_path, os.getpid())
+        return True
+    except OSError:
+        logger.warning("Telegram polling lock already held path=%s; skipping polling in this instance", lock_path)
+        return False
 
 
 def run_flask():
@@ -683,8 +702,11 @@ async def main():
     except Exception as e:
         logger.error(f"Error setting bot commands: {e}")
 
-    # Start polling
-    await bot_app.updater.start_polling(drop_pending_updates=True)
+    # Start polling only if this process owns the lock (prevents Conflict from duplicate instances)
+    polling_started = False
+    if _try_acquire_bot_poll_lock():
+        await bot_app.updater.start_polling(drop_pending_updates=True)
+        polling_started = True
 
     logger.info("✅ Engagr is running!")
 
@@ -695,7 +717,8 @@ async def main():
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down...")
         sched_module.stop_scheduler()
-        await bot_app.updater.stop()
+        if polling_started:
+            await bot_app.updater.stop()
         await bot_app.stop()
         await bot_app.shutdown()
 
