@@ -147,11 +147,9 @@ export default function Queue({ userId, language = 'en' }) {
         ].map(([key, label]) => (
           <button
             key={key}
-            className="queue-filter-btn animate-pop-in"
+            className="queue-filter-btn"
             data-active={platformFilter === key}
-            data-kind={key}
             onClick={() => setPlatformFilter(key)}
-            style={{ animationDelay: key === 'all' ? '0ms' : key === 'linkedin' ? '60ms' : '120ms' }}
           >
             {label}
           </button>
