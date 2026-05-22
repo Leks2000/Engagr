@@ -276,6 +276,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               </svg>
               <div>
                 <span className="text-sm font-medium">LinkedIn Connected</span>
+                {proxyHealth?.ok && (
+                  <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>
+                    Proxy health: {proxyHealth.latency_ms}ms · IP Trust {proxyHealth.trust_score}% ({proxyHealth.status})
+                  </p>
+                )}
                 {profileLoading ? (
                   <p className="text-xs" style={{ color: "var(--color-muted)" }}>Loading profile...</p>
                 ) : profile ? (
@@ -308,7 +313,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         ) : (
           <div className="card">
             <p className="text-[11px] mb-4" style={{ color: 'var(--color-muted)' }}>
-              We auto-select a working US proxy for LinkedIn auth and reuse it for next sessions.
+              Recommended: login via li_at session cookie. Password login may trigger 2FA/captcha.
             </p>
             <div className="flex items-start gap-3 mb-4">
               <span aria-hidden="true" style={{ color: '#0A66C2' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>

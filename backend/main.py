@@ -126,6 +126,13 @@ def get_stats(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@api.route("/api/session/logs/<user_id>", methods=["GET"])
+def session_logs(user_id):
+    try:
+        return jsonify({"logs": sched_module.get_session_logs(user_id)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ── Queue Endpoints ───────────────────────────────────
 
@@ -301,6 +308,21 @@ def linkedin_status(user_id):
 
     storage.update_settings(user_id, {"linkedin": {"connected": connected}})
     return jsonify({"connected": connected})
+
+@api.route("/api/linkedin/proxy-health/<user_id>", methods=["GET"])
+def linkedin_proxy_health(user_id):
+    import time
+    proxy = (_linkedin_proxies(user_id) or {}).get("http")
+    if not proxy:
+        return jsonify({"ok": False, "message": "No proxy configured"})
+    try:
+        started = time.perf_counter()
+        resp = requests.get("https://www.linkedin.com", timeout=10, proxies={"http": proxy, "https": proxy})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        trust = max(50, min(99, 99 - latency_ms // 80))
+        return jsonify({"ok": resp.status_code < 500, "latency_ms": latency_ms, "trust_score": trust, "status": "Safe" if trust >= 80 else "Risky"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
 
 
 @api.route("/api/linkedin/disconnect/<user_id>", methods=["POST"])

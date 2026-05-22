@@ -22,6 +22,7 @@ import ai_comment
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="UTC")
+_session_logs: dict[str, list[str]] = {}
 
 # Reference to the bot's send function (set from telegram_bot.py)
 _send_queue_item = None
@@ -36,6 +37,17 @@ def set_send_callback(callback):
 def set_playwright(pw):
     global _playwright
     _playwright = pw
+
+def _log(user_id: str, message: str):
+    line = f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}"
+    logger.info("session[%s] %s", user_id, message)
+    logs = _session_logs.setdefault(user_id, [])
+    logs.append(line)
+    if len(logs) > 200:
+        del logs[:-200]
+
+def get_session_logs(user_id: str) -> list[str]:
+    return _session_logs.get(user_id, [])
 
 
 def start_scheduler():
@@ -146,11 +158,23 @@ async def run_linkedin_session(user_id: str):
         posts = await linkedin.scrape_posts(_playwright, keywords, user_id=user_id) if _playwright else []
         
         # Calculate how many comments we can still post today
+        configured_comments = li_settings.get("comments_per_day", 5)
+        if li_settings.get("warmup_mode", False):
+            started = li_settings.get("warmup_started_at") or datetime.now(timezone.utc).date().isoformat()
+            try:
+                start_dt = datetime.fromisoformat(started)
+            except Exception:
+                start_dt = datetime.now(timezone.utc)
+            days = max((datetime.now(timezone.utc) - start_dt).days, 0)
+            configured_comments = min(configured_comments, 1 + (days // 3))
+            _log(user_id, f"Warm-up mode active: daily comments cap={configured_comments}")
+
         remaining_comments = min(
             li_settings.get("comments_per_day", 5),
             li_settings.get("daily_comment_hard_limit", 10),
             DAILY_LIMITS["linkedin_comments"] - stats.get("linkedin_comments", 0)
         )
+        _log(user_id, f"Found {len(posts)} posts. Planning up to {remaining_comments} comments.")
         
         # Generate comments and add to queue
         for post in posts[:remaining_comments]:
@@ -177,7 +201,9 @@ async def run_linkedin_session(user_id: str):
                     await _send_queue_item(user_id, queue_item)
                 
                 # Random delay between generating comments
-                await asyncio.sleep(random.uniform(3, 8))
+                delay = random.uniform(3, 8)
+                _log(user_id, f"Added random generation delay: {int(delay)} sec.")
+                await asyncio.sleep(delay)
                 
             except Exception as e:
                 logger.error(f"Error generating comment for post: {e}")

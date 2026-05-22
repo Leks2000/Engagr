@@ -6,6 +6,7 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const [running, setRunning] = useState(false)
+  const [logs, setLogs] = useState([])
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
@@ -13,6 +14,17 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   }, [uid])
 
   useEffect(() => { loadStats(); const interval = setInterval(loadStats, 30000); return () => clearInterval(interval) }, [loadStats])
+  useEffect(() => {
+    const loadLogs = async () => {
+      try {
+        const data = await api.get(`/api/session/logs/${uid}`)
+        setLogs(data?.logs || [])
+      } catch {}
+    }
+    loadLogs()
+    const timer = setInterval(loadLogs, 5000)
+    return () => clearInterval(timer)
+  }, [uid])
 
   const isActive = settings?.session_active !== false
   const toggleSession = async () => {
@@ -65,6 +77,9 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
       )}
 
       <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
+        <div className="card mb-3 text-xs">
+          Warm-up: {settings?.linkedin?.warmup_mode ? 'ON' : 'OFF'} · Daily target: {settings?.linkedin?.comments_per_day || 5}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <StatCard label="Comments" value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
           <StatCard label="Likes" value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
@@ -90,6 +105,12 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
             <p className="text-xs" style={{ color: "var(--color-muted)" }}>Detailed stats</p>
             <p className="text-sm">Total: {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)+(stats?.linkedin_adds||0)+(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}</p>
           </div>
+        </div>
+      </div>
+      <div className="card mt-4">
+        <p className="text-sm font-semibold mb-2">Live session log</p>
+        <div className="text-xs" style={{ maxHeight: 180, overflowY: 'auto', color: 'var(--color-muted)' }}>
+          {logs.length ? logs.slice(-12).map((l, i) => <p key={i}>{l}</p>) : <p>No events yet.</p>}
         </div>
       </div>
     </div>
