@@ -391,8 +391,9 @@ def reddit_disconnect(user_id):
 @api.route("/api/linkedin/auth/<user_id>", methods=["GET"])
 def linkedin_auth(user_id):
     from config import LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI
+    selected_proxy = _pick_working_linkedin_proxy(user_id)
     params = urlencode({"response_type": "code", "client_id": LINKEDIN_CLIENT_ID, "redirect_uri": LINKEDIN_REDIRECT_URI, "state": user_id, "scope": "openid profile email w_member_social"})
-    return jsonify({"url": f"https://www.linkedin.com/oauth/v2/authorization?{params}"})
+    return jsonify({"url": f"https://www.linkedin.com/oauth/v2/authorization?{params}", "proxy": selected_proxy})
 
 
 @api.route("/api/linkedin/callback", methods=["GET"])

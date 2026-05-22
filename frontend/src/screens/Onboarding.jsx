@@ -14,6 +14,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [languageConfirmed, setLanguageConfirmed] = useState(false)
   const [authUrl, setAuthUrl] = useState('')
   const [authState, setAuthState] = useState('idle')
+  const [proxyInUse, setProxyInUse] = useState('')
 
   const [liLoading, setLiLoading] = useState(false)
   const [liConnected, setLiConnected] = useState(false)
@@ -71,6 +72,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     try {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
       setAuthUrl(res.url)
+      setProxyInUse(res.proxy || '')
       setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
     } catch (e) {
@@ -135,6 +137,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
             <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
+            {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
             {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
             {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
           </div>

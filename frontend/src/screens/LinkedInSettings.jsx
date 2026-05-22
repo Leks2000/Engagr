@@ -34,6 +34,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
   const [authUrl, setAuthUrl] = useState('')
   const [authState, setAuthState] = useState('idle')
+  const [proxyInUse, setProxyInUse] = useState(li.proxy_url || '')
 
   const save = () => {
     onSettingsUpdate({
@@ -58,6 +59,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       setAuthUrl(res.url)
+      setProxyInUse(res.proxy || '')
       setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
       
@@ -196,6 +198,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
             <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
+            {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
             {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
             {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
             {authState === 'timeout' && <div className="oauth-status oauth-status-error">Still waiting. Finish login in the opened tab and retry if needed.</div>}
