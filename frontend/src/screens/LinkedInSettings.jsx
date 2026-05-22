@@ -73,7 +73,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             setAuthUrl('')
             setAuthState('success')
             setConnecting(false)
-            onSettingsUpdate({ linkedin: { ...li, connected: true } })
+            const refreshed = await api.get(`/api/linkedin/status/${uid}`)
+            setStatus(!!refreshed.connected)
+            onSettingsUpdate({ linkedin: { ...li, connected: !!refreshed.connected } })
           }
         } catch {}
       }, 2000)

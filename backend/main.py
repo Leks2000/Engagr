@@ -530,7 +530,13 @@ def run_session_now(user_id):
         max_posts = li_cfg.get("comments_per_day", 5)
         user_language = settings.get("language", "en")
 
+        auth = linkedin._load_auth(user_id)
+        logger.info("run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s", user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")))
         posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
+        if not posts:
+            logger.warning("LinkedIn OAuth scrape returned 0 posts user=%s; trying linkedin-api session scrape fallback", user_id)
+            posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
+        logger.info("run_session_now user=%s scraped_posts=%s", user_id, len(posts))
         queued = 0
         now = datetime.now(timezone.utc).isoformat()
         result_posts = []
@@ -573,6 +579,8 @@ def run_session_now(user_id):
                 "author": post.get("author_name", ""),
             })
 
+        if queued == 0:
+            logger.warning("run_session_now user=%s queued=0 (posts=%s keywords=%s)", user_id, len(posts), len(keywords))
         return jsonify({"queued": queued, "posts": result_posts})
     except Exception as e:
         logger.error("manual session run failed user=%s err=%s", user_id, e)
