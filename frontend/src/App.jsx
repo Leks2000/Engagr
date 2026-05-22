@@ -201,10 +201,10 @@ function App() {
 }
 
 const base = { fill: 'none', stroke: 'currentColor', strokeWidth: '1.75', strokeLinecap: 'round', strokeLinejoin: 'round' }
-function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3 13h8V3H3zM13 21h8v-8h-8zM13 3h8v6h-8zM3 21h8v-4H3z"/></svg> }
+function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> }
 function LinkedInIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><path d="M2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg> }
 function RedditIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M8 17c2.667 1 5.333 1 8 0"/><path d="M5 12c0-3 3-5 7-5s7 2 7 5-3 6-7 6-7-3-7-6Z"/><path d="M15 7l1-4 3 1"/><circle cx="19" cy="10" r="1"/><circle cx="5" cy="10" r="1"/></svg> }
-function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg> }
+function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M9 12h6"/><path d="M9 16h6"/></svg> }
 
 export default App
 export { userId }

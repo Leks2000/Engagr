@@ -2,6 +2,7 @@
 Engagr — AI Comment Generation via Groq
 Uses llama-3.3-70b-versatile to generate short, human-sounding comments.
 Generates 3 variants per post with automatic language detection.
+Integrates with News Grounding for industry-relevant references.
 """
 
 import logging
@@ -16,7 +17,9 @@ _client = None
 SYSTEM_PROMPT = (
     "You are a developer and indie hacker. Write a genuine comment. "
     "Rules: 3-20 words, match post language exactly, sound human, "
-    "no hashtags, no emojis, no self-promotion, add real value."
+    "no hashtags, no emojis, no self-promotion, add real value. "
+    "If relevant trending news is provided, you may subtly reference it "
+    "to make your comment feel more current and informed."
 )
 
 TONE_GUIDE = {
@@ -43,18 +46,32 @@ def _clean_comment(text: str) -> str:
     return text.strip()
 
 
-def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly") -> str:
+def _get_news_context(keywords: list[str] = None) -> str:
+    """Get news grounding context for AI."""
+    try:
+        import news_grounding
+        return news_grounding.build_news_context(keywords)
+    except Exception as e:
+        logger.debug("News grounding unavailable: %s", e)
+        return ""
+
+
+def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly", keywords: list[str] = None) -> str:
     """
     Generate a single short, genuine comment for a social media post.
     The AI automatically matches the language of the post.
+    Integrates news grounding for more relevant comments.
     """
     try:
         client = _get_client()
 
         tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
+        news_context = _get_news_context(keywords)
+        news_block = f"{news_context}\n" if news_context else ""
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
+            f"{news_block}"
             f"Post content:\n{post_text[:500]}\n\n"
             f"Write your comment (3-20 words, match post language):"
         )
@@ -80,7 +97,7 @@ def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "fr
 
 
 def generate_comment_variants(
-    post_text: str, user_language: str = "en", platform: str = "linkedin", tone: str = "friendly"
+    post_text: str, user_language: str = "en", platform: str = "linkedin", tone: str = "friendly", keywords: list[str] = None
 ) -> dict:
     """
     Generate 3 comment variants for a post with language detection.
@@ -97,9 +114,12 @@ def generate_comment_variants(
 
         # Step 1: Detect language and generate 3 variants
         tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
+        news_context = _get_news_context(keywords)
+        news_block = f"{news_context}\n" if news_context else ""
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
+            f"{news_block}"
             f"Post content:\n{post_text[:500]}\n\n"
             f"Tasks:\n"
             f"1. Detect the language of this post (output language code like 'en', 'ru', 'es', etc.)\n"

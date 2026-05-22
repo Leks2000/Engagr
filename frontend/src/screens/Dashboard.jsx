@@ -4,47 +4,71 @@ import { api } from '../App'
 const DASH_I18N = {
   en: {
     title: 'Dashboard', subtitle: "Today · Engagement performance",
-    runSession: '▶ Run Session', running: 'Running...', active: 'Active', paused: 'Paused',
+    runSession: 'Run Session', running: 'Running...', active: 'Active', paused: 'Paused',
     comments: 'Comments', likes: 'Likes', added: 'People Added', upvotes: 'Upvotes',
     today: 'Today', nextSessions: 'Next Sessions', totalToday: 'Total Today',
     warmupMode: 'Warm-up Mode', warmupOn: 'ON', warmupOff: 'OFF',
     warmupHint: 'Gradually increases daily activity (+1 every 3 days)',
     warmupDay: 'Day', warmupTarget: 'Target',
     liveLog: 'Live Session Log', noEvents: 'No events yet. Run a session to see activity.',
-    approveAll: '✅ Approve All', skipAll: '❌ Skip All', simulate: '⚡ Simulate',
+    approveAll: 'Approve All', skipAll: 'Skip All', simulate: 'Simulate',
+    analytics: 'Analytics', weekly: 'Week', monthly: 'Month',
+    smartSchedule: 'Smart Schedule', applySchedule: 'Apply',
+    bestTime: 'Optimal times', calculating: 'Calculating...',
+    totalActions: 'Total Actions', avgPerDay: 'Avg/Day', bestDay: 'Best Day',
+    replies: 'Replies', viewReplies: 'View', noReplies: 'No pending replies',
+    trendingNews: 'Trending Now',
   },
   ru: {
     title: 'Главная', subtitle: "Сегодня · Эффективность",
-    runSession: '▶ Запустить', running: 'Запуск...', active: 'Активно', paused: 'Пауза',
+    runSession: 'Запустить', running: 'Запуск...', active: 'Активно', paused: 'Пауза',
     comments: 'Комментарии', likes: 'Лайки', added: 'Добавлено', upvotes: 'Апвоуты',
     today: 'Сегодня', nextSessions: 'Следующие сессии', totalToday: 'Всего сегодня',
     warmupMode: 'Режим прогрева', warmupOn: 'ВКЛ', warmupOff: 'ВЫКЛ',
     warmupHint: 'Постепенно увеличивает активность (+1 каждые 3 дня)',
     warmupDay: 'День', warmupTarget: 'Цель',
     liveLog: 'Живой лог сессии', noEvents: 'Событий пока нет. Запустите сессию.',
-    approveAll: '✅ Одобрить всё', skipAll: '❌ Пропустить всё', simulate: '⚡ Симуляция',
+    approveAll: 'Одобрить всё', skipAll: 'Пропустить всё', simulate: 'Симуляция',
+    analytics: 'Аналитика', weekly: 'Неделя', monthly: 'Месяц',
+    smartSchedule: 'Умное расписание', applySchedule: 'Применить',
+    bestTime: 'Оптимальное время', calculating: 'Расчёт...',
+    totalActions: 'Всего действий', avgPerDay: 'Сред/день', bestDay: 'Лучший день',
+    replies: 'Ответы', viewReplies: 'Смотреть', noReplies: 'Нет ожидающих ответов',
+    trendingNews: 'Тренды сейчас',
   },
   es: {
     title: 'Panel', subtitle: "Hoy · Rendimiento",
-    runSession: '▶ Ejecutar', running: 'Ejecutando...', active: 'Activo', paused: 'Pausado',
+    runSession: 'Ejecutar', running: 'Ejecutando...', active: 'Activo', paused: 'Pausado',
     comments: 'Comentarios', likes: 'Gustas', added: 'Añadidos', upvotes: 'Votos',
     today: 'Hoy', nextSessions: 'Próximas sesiones', totalToday: 'Total hoy',
     warmupMode: 'Modo calentamiento', warmupOn: 'ON', warmupOff: 'OFF',
     warmupHint: 'Aumenta gradualmente la actividad diaria (+1 cada 3 días)',
     warmupDay: 'Día', warmupTarget: 'Meta',
     liveLog: 'Log en vivo', noEvents: 'Sin eventos. Ejecuta una sesión.',
-    approveAll: '✅ Aprobar todo', skipAll: '❌ Saltar todo', simulate: '⚡ Simular',
+    approveAll: 'Aprobar todo', skipAll: 'Saltar todo', simulate: 'Simular',
+    analytics: 'Analítica', weekly: 'Semana', monthly: 'Mes',
+    smartSchedule: 'Horario inteligente', applySchedule: 'Aplicar',
+    bestTime: 'Horas óptimas', calculating: 'Calculando...',
+    totalActions: 'Total acciones', avgPerDay: 'Prom/día', bestDay: 'Mejor día',
+    replies: 'Respuestas', viewReplies: 'Ver', noReplies: 'Sin respuestas pendientes',
+    trendingNews: 'Tendencias ahora',
   },
   de: {
     title: 'Übersicht', subtitle: "Heute · Leistung",
-    runSession: '▶ Starten', running: 'Läuft...', active: 'Aktiv', paused: 'Pausiert',
+    runSession: 'Starten', running: 'Läuft...', active: 'Aktiv', paused: 'Pausiert',
     comments: 'Kommentare', likes: 'Gefällt mir', added: 'Hinzugefügt', upvotes: 'Upvotes',
     today: 'Heute', nextSessions: 'Nächste Sitzungen', totalToday: 'Gesamt heute',
     warmupMode: 'Aufwärm-Modus', warmupOn: 'AN', warmupOff: 'AUS',
     warmupHint: 'Erhöht die tägliche Aktivität schrittweise (+1 alle 3 Tage)',
     warmupDay: 'Tag', warmupTarget: 'Ziel',
     liveLog: 'Live-Sitzungsprotokoll', noEvents: 'Noch keine Ereignisse. Starten Sie eine Sitzung.',
-    approveAll: '✅ Alle genehmigen', skipAll: '❌ Alle überspringen', simulate: '⚡ Simulieren',
+    approveAll: 'Alle genehmigen', skipAll: 'Alle überspringen', simulate: 'Simulieren',
+    analytics: 'Analytik', weekly: 'Woche', monthly: 'Monat',
+    smartSchedule: 'Intelligenter Zeitplan', applySchedule: 'Anwenden',
+    bestTime: 'Optimale Zeiten', calculating: 'Berechnung...',
+    totalActions: 'Aktionen gesamt', avgPerDay: 'Durchschn/Tag', bestDay: 'Bester Tag',
+    replies: 'Antworten', viewReplies: 'Ansehen', noReplies: 'Keine ausstehenden Antworten',
+    trendingNews: 'Trends jetzt',
   },
 }
 
@@ -56,6 +80,21 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   const [logs, setLogs] = useState([])
   const [logExpanded, setLogExpanded] = useState(false)
   const logEndRef = useRef(null)
+
+  // Analytics
+  const [analyticsTab, setAnalyticsTab] = useState('weekly')
+  const [weeklyData, setWeeklyData] = useState(null)
+  const [monthlyData, setMonthlyData] = useState(null)
+
+  // Smart Schedule
+  const [smartTimes, setSmartTimes] = useState(null)
+  const [smartLoading, setSmartLoading] = useState(false)
+
+  // Replies
+  const [replies, setReplies] = useState([])
+
+  // News
+  const [trendingNews, setTrendingNews] = useState([])
 
   const t = DASH_I18N[language] || DASH_I18N.en
 
@@ -88,6 +127,44 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
     }
   }, [logs, logExpanded])
 
+  // Load analytics
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      try {
+        const weekly = await api.get(`/api/analytics/${uid}/weekly`)
+        setWeeklyData(weekly)
+        const monthly = await api.get(`/api/analytics/${uid}/monthly`)
+        setMonthlyData(monthly)
+      } catch {}
+    }
+    loadAnalytics()
+  }, [uid])
+
+  // Load replies
+  useEffect(() => {
+    const loadReplies = async () => {
+      try {
+        const data = await api.get(`/api/replies/${uid}`)
+        setReplies(data?.replies || [])
+      } catch {}
+    }
+    loadReplies()
+    const timer = setInterval(loadReplies, 30000)
+    return () => clearInterval(timer)
+  }, [uid])
+
+  // Load trending news
+  useEffect(() => {
+    const loadNews = async () => {
+      try {
+        const kw = (settings?.linkedin?.keywords || []).slice(0, 3).join(',')
+        const data = await api.get(`/api/news/trending?keywords=${kw}`)
+        setTrendingNews(data?.news || [])
+      } catch {}
+    }
+    loadNews()
+  }, [uid, settings])
+
   const isActive = settings?.session_active !== false
   const toggleSession = async () => {
     try {
@@ -103,17 +180,35 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
     try {
       const res = await api.post(`/api/session/run/${uid}`)
       const count = res?.queued || 0
-      const msg = count > 0 ? `✅ Added ${count} posts to queue` : '⚠️ No posts found. Check keywords and connection.'
+      const msg = count > 0 ? `Added ${count} posts to queue` : 'No posts found. Check keywords and connection.'
       setToast(msg)
       setTimeout(() => setToast(''), 4000)
       if (count > 0 && onNavigate) {
         setTimeout(() => onNavigate('queue'), 1500)
       }
     } catch (err) {
-      setToast('❌ Failed to run session')
+      setToast('Failed to run session')
       setTimeout(() => setToast(''), 3000)
     }
     setRunning(false)
+  }
+
+  // Smart Schedule
+  const loadSmartSchedule = async () => {
+    setSmartLoading(true)
+    try {
+      const res = await api.get(`/api/smart-schedule/${uid}/linkedin`)
+      setSmartTimes(res?.times || null)
+    } catch {}
+    setSmartLoading(false)
+  }
+
+  const applySmartSchedule = async () => {
+    try {
+      await api.post(`/api/smart-schedule/${uid}/linkedin/apply`)
+      setToast('Smart Schedule applied!')
+      setTimeout(() => setToast(''), 3000)
+    } catch {}
   }
 
   // Warm-up mode
@@ -140,6 +235,8 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
 
   const liConnected = settings?.linkedin?.connected
   const rdConnected = settings?.reddit?.connected
+  const activeAnalytics = analyticsTab === 'weekly' ? weeklyData : monthlyData
+  const chartData = analyticsTab === 'weekly' ? weeklyData?.weekly : monthlyData?.monthly
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
@@ -169,9 +266,141 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
       {/* Toast */}
       {toast && (
         <div className="card mb-4 text-sm toast-msg" style={{
-          background: toast.includes('❌') ? '#ffeaea' : toast.includes('⚠️') ? '#fff8e1' : '#e8f5e9',
-          color: toast.includes('❌') ? '#c62828' : toast.includes('⚠️') ? '#e65100' : '#1b5e20'
+          background: toast.includes('Failed') ? '#ffeaea' : toast.includes('No posts') ? '#fff8e1' : '#e8f5e9',
+          color: toast.includes('Failed') ? '#c62828' : toast.includes('No posts') ? '#e65100' : '#1b5e20'
         }}>{toast}</div>
+      )}
+
+      {/* Analytics Section */}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/>
+            </svg>
+            <p className="text-sm font-semibold">{t.analytics}</p>
+          </div>
+          <div className="flex gap-1">
+            <button
+              className="text-xs px-2.5 py-1 rounded-lg font-medium transition-all"
+              style={analyticsTab === 'weekly' ? { background: '#0A66C2', color: '#fff' } : { background: '#f1f5f9', color: '#64748b' }}
+              onClick={() => setAnalyticsTab('weekly')}
+            >{t.weekly}</button>
+            <button
+              className="text-xs px-2.5 py-1 rounded-lg font-medium transition-all"
+              style={analyticsTab === 'monthly' ? { background: '#0A66C2', color: '#fff' } : { background: '#f1f5f9', color: '#64748b' }}
+              onClick={() => setAnalyticsTab('monthly')}
+            >{t.monthly}</button>
+          </div>
+        </div>
+
+        {/* Chart */}
+        {chartData && chartData.length > 0 ? (
+          <div className="mb-3">
+            <div className="flex items-end gap-1" style={{ height: 80 }}>
+              {(analyticsTab === 'weekly' ? chartData : chartData.filter((_, i) => i % 3 === 0 || i === chartData.length - 1)).map((d, i) => {
+                const maxVal = Math.max(...chartData.map(x => x.total), 1)
+                const barH = Math.max((d.total / maxVal) * 64, 4)
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div
+                      className="w-full rounded-sm transition-all"
+                      style={{ height: barH, background: d.total > 0 ? '#0A66C2' : '#e2e8f0', minWidth: 4, maxWidth: 24, opacity: d.total > 0 ? 0.8 : 0.4 }}
+                    />
+                    <span className="text-[9px]" style={{ color: '#94a3b8' }}>
+                      {analyticsTab === 'weekly' ? d.day_name : ''}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Summary stats */}
+            {monthlyData && analyticsTab === 'monthly' && (
+              <div className="grid grid-cols-3 gap-2 mt-3 pt-3" style={{ borderTop: '1px solid #e2e8f0' }}>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.totalActions}</p>
+                  <p className="text-lg font-bold">{monthlyData.total_actions}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.avgPerDay}</p>
+                  <p className="text-lg font-bold">{monthlyData.avg_per_day}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.bestDay}</p>
+                  <p className="text-lg font-bold">{monthlyData.best_day?.total || 0}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-4">
+            <p className="text-xs" style={{ color: 'var(--color-muted)' }}>No data yet. Activity will appear after sessions.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Smart Schedule */}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+            </svg>
+            <p className="text-sm font-semibold">{t.smartSchedule}</p>
+          </div>
+          <button
+            className="text-xs px-2.5 py-1 rounded-lg font-medium"
+            style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}
+            onClick={loadSmartSchedule}
+            disabled={smartLoading}
+          >
+            {smartLoading ? t.calculating : t.bestTime}
+          </button>
+        </div>
+        <p className="text-[11px] mb-2" style={{ color: 'var(--color-muted)' }}>
+          AI analyzes audience activity to find the best posting windows
+        </p>
+        {smartTimes && (
+          <div className="flex items-center gap-2 mt-2">
+            <div className="flex gap-2 flex-1">
+              {smartTimes.map((time, i) => (
+                <span key={i} className="text-xs px-2.5 py-1.5 rounded-lg font-mono font-semibold" style={{ background: '#eff6ff', color: '#0A66C2', border: '1px solid #bfdbfe' }}>
+                  {time}
+                </span>
+              ))}
+            </div>
+            <button
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ background: '#0A66C2', color: '#fff' }}
+              onClick={applySmartSchedule}
+            >
+              {t.applySchedule}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Nested Replies */}
+      {replies.length > 0 && (
+        <div className="card mb-4" style={{ border: '1px solid #fde68a', background: '#fffbeb' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <p className="text-sm font-semibold" style={{ color: '#92400e' }}>{t.replies} ({replies.length})</p>
+            </div>
+          </div>
+          {replies.slice(0, 2).map((r, i) => (
+            <div key={i} className="text-xs p-2 rounded-lg mb-1" style={{ background: '#fef3c7' }}>
+              <span className="font-semibold">{r.author_name}</span> replied: "{(r.latest_reply?.text || '').slice(0, 60)}..."
+            </div>
+          ))}
+          <p className="text-[11px] mt-1" style={{ color: '#92400e' }}>
+            People are engaging with your AI comments. Continue the conversation!
+          </p>
+        </div>
       )}
 
       {/* Warm-up Mode Card */}
@@ -246,6 +475,28 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
         </div>
       </div>
 
+      {/* Trending News */}
+      {trendingNews.length > 0 && (
+        <div className="card mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            <p className="text-xs font-semibold" style={{ color: '#475569' }}>{t.trendingNews}</p>
+          </div>
+          <div className="space-y-1.5">
+            {trendingNews.slice(0, 4).map((item, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                  {item.source === 'HackerNews' ? 'HN' : item.source === 'TechCrunch' ? 'TC' : 'PH'}
+                </span>
+                <p className="text-xs leading-snug" style={{ color: '#334155' }}>{item.title}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Live Terminal Log */}
       <div className="card" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
         <div className="flex items-center justify-between mb-3">
@@ -292,11 +543,10 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
 }
 
 function LogLine({ text }) {
-  // Color-code log lines
   let color = '#94a3b8'
-  if (text.includes('✅') || text.toLowerCase().includes('success') || text.toLowerCase().includes('posted')) color = '#4ade80'
-  else if (text.includes('❌') || text.toLowerCase().includes('error') || text.toLowerCase().includes('failed')) color = '#f87171'
-  else if (text.includes('⏳') || text.toLowerCase().includes('waiting') || text.toLowerCase().includes('delay')) color = '#fbbf24'
+  if (text.includes('success') || text.toLowerCase().includes('posted') || text.toLowerCase().includes('complete')) color = '#4ade80'
+  else if (text.toLowerCase().includes('error') || text.toLowerCase().includes('failed')) color = '#f87171'
+  else if (text.toLowerCase().includes('waiting') || text.toLowerCase().includes('delay')) color = '#fbbf24'
   else if (text.toLowerCase().includes('linkedin')) color = '#60a5fa'
   else if (text.toLowerCase().includes('reddit')) color = '#fb923c'
   else if (text.toLowerCase().includes('generat') || text.toLowerCase().includes('comment')) color = '#a78bfa'
@@ -305,14 +555,13 @@ function LogLine({ text }) {
 }
 
 function PlatformSection({ title, connected, children, reddit, className = '' }) {
-  const color = reddit ? '#FF4500' : '#0A66C2'
   return (
     <div className={className}>
       <div className="flex items-center gap-2 mb-3">
         <span className={`badge ${reddit ? 'badge-reddit' : 'badge-linkedin'}`}>{title}</span>
         {connected
-          ? <span className="text-xs font-medium" style={{ color: '#10b981' }}>● Connected</span>
-          : <span className="text-xs font-medium" style={{ color: '#94a3b8' }}>○ Not connected</span>
+          ? <span className="text-xs font-medium" style={{ color: '#10b981' }}>Connected</span>
+          : <span className="text-xs font-medium" style={{ color: '#94a3b8' }}>Not connected</span>
         }
       </div>
       {children}

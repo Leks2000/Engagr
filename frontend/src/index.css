@@ -279,7 +279,7 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
   transition: color 0.15s;
   border: none;
-  background: none;
+  background: transparent;
   font-family: var(--font-sans);
 }
 
@@ -290,6 +290,7 @@ input[type="range"]::-moz-range-thumb {
 .nav-item svg {
   width: 22px;
   height: 22px;
+  background: transparent;
 }
 
 /* ── Platform Badge ──────────────────────────── */
@@ -359,8 +360,8 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
+  background: transparent;
+  border: none;
 }
 
 .metric-label { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #334155; }

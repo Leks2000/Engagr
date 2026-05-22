@@ -25,6 +25,9 @@ from config import TELEGRAM_BOT_TOKEN, APP_ENV, DATA_DIR
 import storage
 import scheduler as sched_module
 import telegram_bot
+import smart_schedule
+import nested_replies
+import news_grounding
 
 # ── Logging ───────────────────────────────────────────
 
@@ -727,6 +730,108 @@ def run_session_now(user_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Smart Schedule Endpoints ─────────────────────────
+
+@api.route("/api/smart-schedule/<user_id>/<platform>", methods=["GET"])
+def get_smart_schedule(user_id, platform):
+    """Calculate optimal posting times based on activity patterns."""
+    try:
+        times = smart_schedule.calculate_optimal_times(user_id, platform)
+        return jsonify({"times": times, "platform": platform})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/smart-schedule/<user_id>/<platform>/apply", methods=["POST"])
+def apply_smart_schedule(user_id, platform):
+    """Apply smart schedule times to user settings."""
+    try:
+        times = smart_schedule.calculate_optimal_times(user_id, platform)
+        if platform == "linkedin":
+            storage.update_settings(user_id, {"linkedin": {"session_times": times}})
+        else:
+            storage.update_settings(user_id, {"reddit": {"session_times": times}})
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"status": "ok", "times": times})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Analytics Endpoints ──────────────────────────────
+
+@api.route("/api/analytics/<user_id>/weekly", methods=["GET"])
+def get_weekly_analytics(user_id):
+    """Get weekly analytics data for dashboard chart."""
+    try:
+        data = smart_schedule.get_weekly_analytics(user_id)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/analytics/<user_id>/monthly", methods=["GET"])
+def get_monthly_analytics(user_id):
+    """Get monthly analytics data."""
+    try:
+        data = smart_schedule.get_monthly_analytics(user_id)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Nested Replies Endpoints ─────────────────────────
+
+@api.route("/api/replies/<user_id>", methods=["GET"])
+def get_reply_queue(user_id):
+    """Get pending reply threads."""
+    try:
+        queue = nested_replies.get_reply_queue(user_id)
+        return jsonify({"replies": queue})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/replies/<user_id>/<thread_id>/suggest", methods=["POST"])
+def suggest_reply(user_id, thread_id):
+    """Generate AI suggestion for a reply."""
+    try:
+        threads = nested_replies.get_tracked_threads(user_id)
+        thread = next((t for t in threads if t["id"] == thread_id), None)
+        if not thread:
+            return jsonify({"error": "Thread not found"}), 404
+
+        settings = storage.get_settings(user_id)
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+        suggestion = nested_replies.generate_reply_suggestion(thread, tone=tone)
+        return jsonify({"suggestion": suggestion or ""})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/replies/<user_id>/<thread_id>/dismiss", methods=["POST"])
+def dismiss_reply(user_id, thread_id):
+    """Dismiss a reply thread (won't reply)."""
+    try:
+        nested_replies.dismiss_reply_thread(user_id, thread_id)
+        return jsonify({"status": "dismissed"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── News Grounding Endpoint ──────────────────────────
+
+@api.route("/api/news/trending", methods=["GET"])
+def get_trending_news():
+    """Get current trending news from tech sources."""
+    try:
+        keywords = request.args.get("keywords", "").split(",")
+        keywords = [k.strip() for k in keywords if k.strip()]
+        news = news_grounding.get_trending_news(keywords, limit=8)
+        return jsonify({"news": news})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Background Posting ────────────────────────────────
 
 async def _post_item_delayed(user_id: str, item: dict):
@@ -758,9 +863,32 @@ async def _post_item_delayed(user_id: str, item: dict):
 
     storage.remove_from_queue(user_id, item["id"])
 
+    # Track for nested replies
+    if success:
+        try:
+            nested_replies.track_posted_comment(user_id, item)
+        except Exception as e:
+            logger.error("Failed to track posted comment: %s", e)
+
+        # Save activity record for analytics
+        try:
+            from datetime import datetime, timezone
+            stats = storage.get_stats(user_id)
+            smart_schedule.save_activity_record(user_id, {
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "linkedin_comments": stats.get("linkedin_comments", 0),
+                "linkedin_likes": stats.get("linkedin_likes", 0),
+                "reddit_comments": stats.get("reddit_comments", 0),
+                "reddit_upvotes": stats.get("reddit_upvotes", 0),
+                "best_hour": datetime.now(timezone.utc).hour,
+                "engagement_score": 1,
+            })
+        except Exception as e:
+            logger.error("Failed to save activity record: %s", e)
+
     # Notify user
     try:
-        status_msg = "✅ Comment posted successfully!" if success else "❌ Failed to post comment."
+        status_msg = "Comment posted successfully!" if success else "Failed to post comment."
         await telegram_bot.send_queue_item_to_user(user_id, {"type": "error", "message": status_msg})
     except Exception:
         pass
