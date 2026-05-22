@@ -28,6 +28,10 @@ import telegram_bot
 import smart_schedule
 import nested_replies
 import news_grounding
+import humanness_scorer
+import interaction_memory
+import invite_generator
+import daily_digest
 
 # ── Logging ───────────────────────────────────────────
 
@@ -39,16 +43,10 @@ logging.basicConfig(
 logger = logging.getLogger("engagr")
 
 LINKEDIN_PROXY_POOL = [
-    "http://jgonrihk:waie52nyin2x@23.95.150.145:6114",
-    "http://jgonrihk:waie52nyin2x@38.154.203.95:5863",
-    "http://jgonrihk:waie52nyin2x@198.23.243.226:6361",
-    "http://jgonrihk:waie52nyin2x@209.127.138.10:5784",
-    "http://jgonrihk:waie52nyin2x@38.154.185.97:6370",
-    "http://jgonrihk:waie52nyin2x@50.114.82.8:6992",
-    "http://jgonrihk:waie52nyin2x@198.105.121.200:6462",
-    "http://jgonrihk:waie52nyin2x@64.137.96.74:6641",
-    "http://jgonrihk:waie52nyin2x@84.247.60.125:6095",
-    "http://jgonrihk:waie52nyin2x@142.111.67.146:5611",
+    # Proxies loaded from environment or configured per-user in settings
+    p.strip()
+    for p in (os.getenv("LINKEDIN_PROXY_POOL", "")).split(",")
+    if p.strip()
 ]
 
 
@@ -664,6 +662,16 @@ def run_session_now(user_id):
             logger.warning("LinkedIn OAuth scrape returned 0 posts user=%s; trying linkedin-api session scrape fallback", user_id)
             posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
         sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
+
+        # Apply humanness filter — skip AI-generated posts
+        pre_filter_count = len(posts)
+        posts = humanness_scorer.filter_human_posts(posts, threshold=0.5)
+        filtered_out = pre_filter_count - len(posts)
+        if filtered_out > 0:
+            sched_module._log(user_id, f"🤖 Filtered {filtered_out} AI-generated posts. {len(posts)} human posts remain.")
+
+        # Enrich with interaction memory
+        posts = interaction_memory.get_repeat_authors_in_queue(user_id, posts)
         logger.info("run_session_now user=%s scraped_posts=%s", user_id, len(posts))
         queued = 0
         now = datetime.now(timezone.utc).isoformat()
@@ -710,6 +718,9 @@ def run_session_now(user_id):
                 "post_language": comment_data.get("post_language", "en"),
                 "status": "pending",
                 "created_at": now,
+                "humanness_score": post.get("humanness_score", 1.0),
+                "has_previous_interaction": post.get("has_previous_interaction", False),
+                "interaction_hint": post.get("interaction_hint", ""),
             })
             queued += 1
             result_posts.append({
@@ -832,6 +843,154 @@ def get_trending_news():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Invite Generator Endpoints ────────────────────────
+
+@api.route("/api/invite/<user_id>/generate", methods=["POST"])
+def generate_invite(user_id):
+    """Generate personalized connection invite message."""
+    try:
+        data = request.get_json() or {}
+        author_name = data.get("author_name", "")
+        post_text = data.get("post_text", "")
+        post_topic = data.get("post_topic", "")
+
+        if not author_name:
+            return jsonify({"error": "author_name is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        language = settings.get("language", "en")
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+
+        # Get previous interaction context
+        prev_ctx = interaction_memory.get_interaction_context_for_ai(user_id, author_name)
+
+        result = invite_generator.generate_invite_message(
+            author_name=author_name,
+            post_text=post_text,
+            post_topic=post_topic,
+            platform="linkedin",
+            tone=tone,
+            language=language,
+            previous_interaction=prev_ctx,
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/invite/<user_id>/followup", methods=["POST"])
+def generate_followup_invite(user_id):
+    """Generate followup invite for an author we've already interacted with."""
+    try:
+        data = request.get_json() or {}
+        author_name = data.get("author_name", "")
+        previous_comment = data.get("previous_comment", "")
+
+        if not author_name:
+            return jsonify({"error": "author_name is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        language = settings.get("language", "en")
+
+        history = interaction_memory.get_author_history(user_id, author_name)
+        count = history.get("interaction_count", 0) if history else 0
+
+        result = invite_generator.generate_followup_invite(
+            author_name=author_name,
+            previous_comment=previous_comment,
+            interaction_count=count,
+            language=language,
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Humanness Scoring Endpoint ───────────────────────
+
+@api.route("/api/humanness/score", methods=["POST"])
+def score_humanness(user_id=None):
+    """Score a post's humanness to decide if it's worth commenting on."""
+    try:
+        data = request.get_json() or {}
+        text = data.get("text", "")
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+
+        result = humanness_scorer.score_humanness(text)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Interaction Memory Endpoints ─────────────────────
+
+@api.route("/api/memory/<user_id>/interactions", methods=["GET"])
+def get_interactions(user_id):
+    """Get all interaction memory for user (CRM view)."""
+    try:
+        interactions = interaction_memory.get_all_interactions(user_id)
+        top = interaction_memory.get_top_connections(user_id, limit=20)
+        return jsonify({"total": len(interactions), "top_connections": top})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/memory/<user_id>/author/<author_name>", methods=["GET"])
+def get_author_memory(user_id, author_name):
+    """Get interaction history with a specific author."""
+    try:
+        history = interaction_memory.get_author_history(user_id, author_name)
+        return jsonify({"history": history})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/memory/<user_id>/record", methods=["POST"])
+def record_interaction_endpoint(user_id):
+    """Record a new interaction with an author."""
+    try:
+        data = request.get_json() or {}
+        interaction_memory.record_interaction(
+            user_id=user_id,
+            author_name=data.get("author_name", ""),
+            author_profile_url=data.get("profile_url", ""),
+            platform=data.get("platform", "linkedin"),
+            interaction_type=data.get("type", "comment"),
+            context=data.get("context", ""),
+            post_url=data.get("post_url", ""),
+            our_message=data.get("our_message", ""),
+        )
+        return jsonify({"status": "recorded"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Daily Digest Endpoint ─────────────────────────────
+
+@api.route("/api/digest/<user_id>/preview", methods=["GET"])
+def preview_digest(user_id):
+    """Preview what the daily digest would look like."""
+    try:
+        import asyncio as _asyncio
+        items = _asyncio.run(daily_digest.generate_daily_digest(user_id))
+        return jsonify({"items": items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/digest/<user_id>/send", methods=["POST"])
+def send_digest_now(user_id):
+    """Manually trigger daily digest send."""
+    try:
+        asyncio.run_coroutine_threadsafe(
+            daily_digest.send_daily_digest(user_id), _loop
+        )
+        return jsonify({"status": "sending"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Background Posting ────────────────────────────────
 
 async def _post_item_delayed(user_id: str, item: dict):
@@ -869,6 +1028,20 @@ async def _post_item_delayed(user_id: str, item: dict):
             nested_replies.track_posted_comment(user_id, item)
         except Exception as e:
             logger.error("Failed to track posted comment: %s", e)
+
+        # Record in interaction memory
+        try:
+            interaction_memory.record_interaction(
+                user_id=user_id,
+                author_name=item.get("author_name", "") or item.get("author", ""),
+                author_profile_url=item.get("post_url", ""),
+                platform=platform,
+                interaction_type="comment",
+                post_url=item.get("post_url", ""),
+                our_message=item.get("comment", ""),
+            )
+        except Exception as e:
+            logger.error("Failed to record interaction: %s", e)
 
         # Save activity record for analytics
         try:

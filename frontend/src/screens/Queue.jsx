@@ -256,6 +256,20 @@ export default function Queue({ userId, language = 'en' }) {
     }
   }
 
+  const handleGenerateInvite = async (item) => {
+    try {
+      const result = await api.post(`/api/invite/${userId}/generate`, {
+        author_name: item.author_name || item.author || '',
+        post_text: item.post_text || item.post_excerpt || '',
+        post_topic: '',
+      })
+      return result
+    } catch (err) {
+      console.error('Invite generation error:', err)
+      return { message: `Hi ${(item.author_name || 'there').split(' ')[0]}! Your post resonated with me. Let's connect!`, char_count: 60, variants: [] }
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-3 px-5 pt-6">
@@ -394,6 +408,7 @@ export default function Queue({ userId, language = 'en' }) {
                   onSkip={() => handleSkip(item.id)}
                   onRegenerate={() => handleRegenerate(item.id)}
                   onSelectVariant={handleSelectVariant}
+                  onGenerateInvite={handleGenerateInvite}
                   language={language}
                 />
               )}
