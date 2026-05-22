@@ -544,6 +544,86 @@ def reddit_check(user_id):
     return jsonify({"connected": connected})
 
 
+@api.route("/api/linkedin/warmup/<user_id>", methods=["POST"])
+def linkedin_warmup_tick(user_id):
+    """Advance warm-up day counter and adjust comments_per_day."""
+    try:
+        from datetime import datetime, timezone
+        settings = storage.get_settings(user_id)
+        li_cfg = settings.get("linkedin", {})
+        if not li_cfg.get("warmup_mode", False):
+            return jsonify({"status": "warmup_disabled"})
+        current_day = li_cfg.get("warmup_day", 1)
+        new_day = current_day + 1
+        # Every 3 days, increment target by 1 (max 15)
+        base_target = li_cfg.get("warmup_base_target", 1)
+        new_target = min(base_target + (new_day // 3), 15)
+        storage.update_settings(user_id, {
+            "linkedin": {
+                **li_cfg,
+                "warmup_day": new_day,
+                "comments_per_day": new_target,
+                "warmup_started_at": li_cfg.get("warmup_started_at", datetime.now(timezone.utc).date().isoformat()),
+            }
+        })
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"status": "ok", "warmup_day": new_day, "comments_per_day": new_target})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/session/simulate/<user_id>", methods=["POST"])
+def simulate_session(user_id):
+    """Generate simulated queue items for demo/testing."""
+    import ai_comment, uuid
+    from datetime import datetime, timezone
+
+    try:
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        li_cfg = settings.get("linkedin", {})
+        tone = li_cfg.get("tone", "friendly")
+
+        # Sample posts for simulation
+        sample_posts = [
+            {"text": "Building in public is the best marketing strategy for B2B SaaS founders. Transparency wins trust and customers.", "author": "Александр Иванов", "platform": "linkedin"},
+            {"text": "AI is not replacing developers, it is making us 10x more productive. The future is human+AI collaboration.", "author": "Maria Schmidt", "platform": "reddit"},
+            {"text": "The secret to PMF is talking to 100 customers before writing a single line of code. No shortcuts.", "author": "John Doe", "platform": "linkedin"},
+        ]
+        now = datetime.now(timezone.utc).isoformat()
+        queued = 0
+        for post in sample_posts:
+            try:
+                comment_data = ai_comment.generate_comment_variants(
+                    post["text"], user_language, post["platform"], tone=tone
+                )
+                variants = comment_data.get("variants", [post["text"][:100]])
+                item_id = f"sim_{uuid.uuid4().hex[:8]}"
+                storage.add_to_queue(user_id, {
+                    "id": item_id,
+                    "platform": post["platform"],
+                    "post_text": post["text"],
+                    "post_excerpt": post["text"][:150],
+                    "author_name": post["author"],
+                    "reactions_count": 42,
+                    "post_url": "https://www.linkedin.com/feed/update/sim",
+                    "comment_variants": variants,
+                    "selected_comment": variants[0] if variants else "",
+                    "comment": variants[0] if variants else "",
+                    "user_language": user_language,
+                    "post_language": "en",
+                    "status": "pending",
+                    "created_at": now,
+                    "simulated": True,
+                })
+                queued += 1
+            except Exception as e:
+                logger.error("simulate item error: %s", e)
+        return jsonify({"queued": queued})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api.route("/api/session/run/<user_id>", methods=["POST"])
 def run_session_now(user_id):
     import linkedin
@@ -556,12 +636,31 @@ def run_session_now(user_id):
         max_posts = min(li_cfg.get("comments_per_day", 5), li_cfg.get("daily_comment_hard_limit", 10))
         user_language = settings.get("language", "en")
 
+        # Apply warm-up mode limit
+        if li_cfg.get("warmup_mode", False):
+            from datetime import datetime, timezone
+            started = li_cfg.get("warmup_started_at") or datetime.now(timezone.utc).date().isoformat()
+            try:
+                start_dt = datetime.fromisoformat(started)
+                if start_dt.tzinfo is None:
+                    from datetime import timezone as tz
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                start_dt = datetime.now(timezone.utc)
+            days = max((datetime.now(timezone.utc) - start_dt).days, 0)
+            warmup_limit = min(1 + (days // 3), 15)
+            max_posts = min(max_posts, warmup_limit)
+            sched_module._log(user_id, f"[Warm-up Day {days+1}] Daily comment limit: {max_posts}")
+
+        sched_module._log(user_id, f"🔍 Searching posts by keywords: {', '.join(keywords[:3])}...")
         auth = linkedin._load_auth(user_id)
         logger.info("run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s", user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")))
         posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         if not posts:
+            sched_module._log(user_id, "⚠️ OAuth scrape returned 0 posts. Trying cookie-based fallback...")
             logger.warning("LinkedIn OAuth scrape returned 0 posts user=%s; trying linkedin-api session scrape fallback", user_id)
             posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
+        sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
         logger.info("run_session_now user=%s scraped_posts=%s", user_id, len(posts))
         queued = 0
         now = datetime.now(timezone.utc).isoformat()
@@ -572,14 +671,25 @@ def run_session_now(user_id):
             if not post_text:
                 continue
 
+            author = post.get("author_name", "Unknown")
+            sched_module._log(user_id, f"✍️ Post from {author}. Generating {user_language.upper()} comment ({li_cfg.get('tone', 'friendly')} tone)...")
+
+            # Apply random delay before generating (anti-ban)
+            import random as _random
+            jitter = li_cfg.get("session_jitter_minutes", [3, 17])
+            jitter_sec = _random.randint(5, 30)
+            sched_module._log(user_id, f"⏳ Random delay before next action: {jitter_sec}s...")
+
             # Generate 3 comment variants with language detection
             comment_data = ai_comment.generate_comment_variants(
                 post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly")
             )
             variants = comment_data.get("variants", [])
             if not variants:
+                sched_module._log(user_id, "❌ Comment generation failed for this post. Skipping.")
                 continue
 
+            sched_module._log(user_id, f"✅ Generated {len(variants)} comment variants. Added to review queue.")
             item_id = f"li_{post.get('id', queued)}_{queued}"
             storage.add_to_queue(user_id, {
                 "id": item_id,
@@ -606,9 +716,13 @@ def run_session_now(user_id):
             })
 
         if queued == 0:
+            sched_module._log(user_id, f"⚠️ No comments queued (posts={len(posts)}, keywords={len(keywords)}). Check connection and keywords.")
             logger.warning("run_session_now user=%s queued=0 (posts=%s keywords=%s)", user_id, len(posts), len(keywords))
+        else:
+            sched_module._log(user_id, f"🎉 Session complete. {queued} items added to review queue.")
         return jsonify({"queued": queued, "posts": result_posts})
     except Exception as e:
+        sched_module._log(user_id, f"❌ Session error: {str(e)[:120]}")
         logger.error("manual session run failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500
 

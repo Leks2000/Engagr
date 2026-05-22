@@ -13,14 +13,13 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [dailyHardLimit, setDailyHardLimit] = useState(li.daily_comment_hard_limit || 10)
   const [tone, setTone] = useState(li.tone || 'friendly')
   const [jitterRange, setJitterRange] = useState(li.session_jitter_minutes || [3, 17])
-  const [likesPerDay] = useState(li.likes_per_day || 5)
   const [addRange, setAddRange] = useState(li.people_add_range || [1, 3])
   const [addByKeywords, setAddByKeywords] = useState(li.add_people_by_keywords || false)
   const [addKeywords, setAddKeywords] = useState(li.add_people_keywords || [])
   const [sessionTimes, setSessionTimes] = useState(li.session_times || ['09:00', '14:00', '19:00'])
   const [newTime, setNewTime] = useState('')
-  const [dirty, setDirty] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  const [ctaTemplates, setCtaTemplates] = useState(li.cta_templates || [])
+  const [newCta, setNewCta] = useState('')
 
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(false)
@@ -28,9 +27,13 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [showSaved, setShowSaved] = useState(false)
   const saveTimerRef = useRef(null)
   const savedToastTimerRef = useRef(null)
-    
+
+  // Proxy health
+  const [proxyHealth, setProxyHealth] = useState(null)
+
   // Login form
   const [liAt, setLiAt] = useState('')
+  const [showCookieForm, setShowCookieForm] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -55,12 +58,10 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         add_people_by_keywords: addByKeywords,
         add_people_keywords: addKeywords,
         session_times: sessionTimes,
+        cta_templates: ctaTemplates,
       },
     })
-    setDirty(false)
   }
-
-  const markDirty = () => setDirty(true)
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -71,8 +72,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       setProxyInUse(res.proxy || '')
       setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
-      
-      // Poll status every 2 sec until connected
+
       authPollRef.current = setInterval(async () => {
         try {
           const st = await api.get(`/api/linkedin/check/${uid}`)
@@ -88,26 +88,35 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           }
         } catch {}
       }, 2000)
-  
-      // Stop after 2 minutes if not connected
+
       authPollTimeoutRef.current = setTimeout(() => {
         clearInterval(authPollRef.current)
         setConnecting(false)
         setAuthState('timeout')
       }, 120000)
-  
+
     } catch (e) {
       setLoginError(e.message || 'Failed to start OAuth')
       setConnecting(false)
     }
   }
+
   const handleCookieConnect = async () => {
-    if (!liAt) { setLoginError('Enter li_at cookie'); return }
+    if (!liAt.trim()) { setLoginError('Please enter your li_at cookie value'); return }
     setConnecting(true); setLoginError('')
     try {
-      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt })
-      if (res.connected) { setStatus(true); onSettingsUpdate({ linkedin: { ...li, connected: true } }) }
-    } catch (e) { setLoginError('Cookie login failed') }
+      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt.trim() })
+      if (res.connected) {
+        setStatus(true)
+        setShowCookieForm(false)
+        setLiAt('')
+        onSettingsUpdate({ linkedin: { ...li, connected: true } })
+      } else {
+        setLoginError('Cookie is invalid or expired. Please get a fresh li_at from linkedin.com')
+      }
+    } catch (e) {
+      setLoginError('Cookie login failed. Make sure the cookie is valid.')
+    }
     setConnecting(false)
   }
 
@@ -116,7 +125,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   }, [settings])
 
   useEffect(() => {
-    // Sync connection after OAuth callback return (app may be reopened with stale local state).
     const params = new URLSearchParams(window.location.search)
     const fromLinkedInCallback = params.get('linkedin') === 'connected'
     const syncStatus = async () => {
@@ -165,11 +173,28 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     loadProfile()
   }, [status, uid])
 
+  // Load proxy health when connected
+  useEffect(() => {
+    if (!status) { setProxyHealth(null); return }
+    const loadProxyHealth = async () => {
+      try {
+        const data = await api.get(`/api/linkedin/proxy-health/${uid}`)
+        setProxyHealth(data)
+      } catch {
+        setProxyHealth(null)
+      }
+    }
+    loadProxyHealth()
+    const interval = setInterval(loadProxyHealth, 30000)
+    return () => clearInterval(interval)
+  }, [status, uid])
+
   const handleDisconnect = async () => {
     setDisconnecting(true)
     try {
       await api.post(`/api/linkedin/disconnect/${uid}`)
       setProfile(null)
+      setProxyHealth(null)
       onSettingsUpdate({
         linkedin: {
           ...li,
@@ -189,6 +214,17 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   const removeSessionTime = (time) => {
     setSessionTimes(sessionTimes.filter(t => t !== time))
+  }
+
+  const addCtaTemplate = () => {
+    if (newCta.trim() && ctaTemplates.length < 5) {
+      setCtaTemplates([...ctaTemplates, newCta.trim()])
+      setNewCta('')
+    }
+  }
+
+  const removeCtaTemplate = (idx) => {
+    setCtaTemplates(ctaTemplates.filter((_, i) => i !== idx))
   }
 
   const derivedKeywords = useMemo(() => {
@@ -219,6 +255,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             add_people_by_keywords: addByKeywords,
             add_people_keywords: addKeywords,
             session_times: sessionTimes,
+            cta_templates: ctaTemplates,
           },
         })
         setSaveState('saved')
@@ -230,31 +267,33 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       }
     }, 1000)
     return () => clearTimeout(saveTimerRef.current)
-  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, addRange, addByKeywords, addKeywords, sessionTimes])
+  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, addRange, addByKeywords, addKeywords, sessionTimes, ctaTemplates])
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
-      {authUrl && (
+      {authUrl && authUrl !== 'callback' && (
         <div className="oauth-modal-backdrop">
           <div className="oauth-modal animate-slide-up">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-semibold">LinkedIn authorization</p>
-              <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
+              <button className="text-sm" onClick={() => { setAuthUrl(''); setConnecting(false); }}>✕</button>
             </div>
             <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
             {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
             {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
-            {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
+            {authState === 'success' && <div className="oauth-status">✅ LinkedIn connected successfully.</div>}
             {authState === 'timeout' && <div className="oauth-status oauth-status-error">Still waiting. Finish login in the opened tab and retry if needed.</div>}
           </div>
         </div>
       )}
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold tracking-tight">LinkedIn</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Engagement settings</p>
         </div>
-        {status ? (          <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
+        {status ? (
+          <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
             ● Connected
           </span>
         ) : (
@@ -267,90 +306,134 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       {/* Account Section */}
       <Section title="Account" subtitle={status ? 'Session active' : 'Connect your LinkedIn account'}>
         {status ? (
-          <div className="card flex items-center justify-between py-3">
-            <div className="flex items-center gap-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
-                <rect x="2" y="9" width="4" height="12" />
-                <circle cx="4" cy="4" r="2" />
-              </svg>
-              <div>
-                <span className="text-sm font-medium">LinkedIn Connected</span>
-                {proxyHealth?.ok && (
-                  <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>
-                    Proxy health: {proxyHealth.latency_ms}ms · IP Trust {proxyHealth.trust_score}% ({proxyHealth.status})
-                  </p>
-                )}
-                {profileLoading ? (
-                  <p className="text-xs" style={{ color: "var(--color-muted)" }}>Loading profile...</p>
-                ) : profile ? (
-                  <div className="mt-2 flex items-center gap-3">
-                    {profile.picture_url ? (
-                      <img src={profile.picture_url} alt={profile.name || "LinkedIn"} className="w-10 h-10 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "#e3f2fd", color: "#0A66C2" }}>
-                        {(profile.name || "LI").split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-sm font-bold">{profile.name || "LinkedIn User"}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>{profile.headline || ""}</p>
-                      <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>{profile.email || ""}</p>
-                    </div>
-                  </div>
-                ) : null}
+          <div className="card py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                  <rect x="2" y="9" width="4" height="12" />
+                  <circle cx="4" cy="4" r="2" />
+                </svg>
+                <div>
+                  <span className="text-sm font-medium">LinkedIn Connected</span>
+                  {/* Proxy Health Widget */}
+                  {proxyHealth?.ok ? (
+                    <p className="text-[11px] mt-0.5" style={{ color: proxyHealth.trust_score >= 80 ? 'var(--color-success)' : 'var(--color-warning)' }}>
+                      🛡️ Proxy: {proxyHealth.latency_ms}ms · Trust {proxyHealth.trust_score}% ({proxyHealth.status})
+                    </p>
+                  ) : proxyHealth && !proxyHealth.ok ? (
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-danger)' }}>
+                      ⚠️ Proxy issue: {proxyHealth.message || 'check connection'}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-muted)' }}>
+                      Checking proxy health…
+                    </p>
+                  )}
+                </div>
               </div>
+              <button
+                className="text-xs px-3 py-1.5 rounded-lg"
+                style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+              >
+                {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+              </button>
             </div>
-            <button
-              className="text-xs px-3 py-1.5 rounded-lg mt-3"
-              style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-            >
-              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
-            </button>
+            {/* Profile card */}
+            {profileLoading ? (
+              <p className="text-xs mt-2" style={{ color: 'var(--color-muted)' }}>Loading profile...</p>
+            ) : profile ? (
+              <div className="mt-3 flex items-center gap-3 p-3 rounded-xl" style={{ background: '#f0f7ff', border: '1px solid #bfdbfe' }}>
+                {profile.picture_url ? (
+                  <img src={profile.picture_url} alt={profile.name || 'LinkedIn'} className="w-10 h-10 rounded-full object-cover" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: '#0A66C2', color: 'white' }}>
+                    {(profile.name || 'LI').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-bold">{profile.name || 'LinkedIn User'}</p>
+                  {profile.headline && <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{profile.headline}</p>}
+                  {profile.email && <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>{profile.email}</p>}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="card">
             <p className="text-[11px] mb-4" style={{ color: 'var(--color-muted)' }}>
-              Recommended: login via li_at session cookie. Password login may trigger 2FA/captcha.
+              Two ways to connect: OAuth (recommended) or paste your <code className="bg-gray-100 px-1 rounded">li_at</code> session cookie.
             </p>
-            <div className="flex items-start gap-3 mb-4">
-              <span aria-hidden="true" style={{ color: '#0A66C2' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-              <div>
-                <p className="font-medium text-sm mb-1">Secure login</p>
-                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Your password is used once to create a session. Only cookies are saved.</p>
-              </div>
-            </div>
+
             {loginError && (
-              <p className="text-xs mb-3" style={{ color: 'var(--color-danger)' }}>{loginError}</p>
+              <div className="mb-3 p-2 rounded-lg text-xs" style={{ background: '#fef2f2', color: 'var(--color-danger)', border: '1px solid #fecaca' }}>
+                {loginError}
+              </div>
             )}
+
+            {/* OAuth Button */}
             <button
-              className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
-              style={{
-                background: connecting ? '#ccc' : '#0077B5',
-                color: '#fff',
-                border: 'none',
-              }}
+              className="w-full py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all mb-3"
+              style={{ background: connecting && !showCookieForm ? '#ccc' : '#0077B5', color: '#fff', border: 'none' }}
               onClick={handleConnect}
               disabled={connecting}
             >
-              {connecting ? (
-                <>
-                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Logging in...
-                </>
+              {connecting && !showCookieForm ? (
+                <><span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Connecting…</>
               ) : (
-                <>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
-                    <rect x="2" y="9" width="4" height="12" />
-                    <circle cx="4" cy="4" r="2" />
-                  </svg>
-                  Connect via LinkedIn
-                </>
+                <><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" /><rect x="2" y="9" width="4" height="12" /><circle cx="4" cy="4" r="2" /></svg>Connect via OAuth</>
               )}
             </button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-2 my-3">
+              <div className="flex-1 h-px" style={{ background: '#e5e7eb' }} />
+              <span className="text-xs" style={{ color: 'var(--color-muted)' }}>or use cookie</span>
+              <div className="flex-1 h-px" style={{ background: '#e5e7eb' }} />
+            </div>
+
+            {/* Cookie toggle */}
+            {!showCookieForm ? (
+              <button
+                className="w-full py-2.5 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all"
+                style={{ background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' }}
+                onClick={() => setShowCookieForm(true)}
+              >
+                🍪 Paste li_at cookie
+              </button>
+            ) : (
+              <div className="animate-fade-in">
+                <p className="text-[11px] mb-2" style={{ color: 'var(--color-muted)' }}>
+                  Open linkedin.com → DevTools → Application → Cookies → copy value of <code className="bg-gray-100 px-1 rounded">li_at</code>
+                </p>
+                <textarea
+                  className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none mb-2"
+                  style={{ borderColor: '#e2e8f0', minHeight: 60, fontFamily: 'monospace' }}
+                  placeholder="AQEDARx... (your li_at cookie value)"
+                  value={liAt}
+                  onChange={e => setLiAt(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 py-2.5 rounded-xl font-medium text-sm transition-all"
+                    style={{ background: connecting ? '#ccc' : '#0A66C2', color: '#fff', border: 'none' }}
+                    onClick={handleCookieConnect}
+                    disabled={connecting}
+                  >
+                    {connecting ? 'Verifying…' : '✓ Connect'}
+                  </button>
+                  <button
+                    className="px-4 py-2.5 rounded-xl font-medium text-sm"
+                    style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0' }}
+                    onClick={() => { setShowCookieForm(false); setLiAt(''); setLoginError('') }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Section>
@@ -375,37 +458,60 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
       {/* Comments per day */}
       <Section title="Comments per day" subtitle={`${commentsPerDay} comments`}>
-        <Slider
-          min={1}
-          max={15}
-          value={commentsPerDay}
-          onChange={(v) => { setCommentsPerDay(v) }}
-        />
+        <Slider min={1} max={15} value={commentsPerDay} onChange={(v) => { setCommentsPerDay(v) }} />
       </Section>
 
       <Section title="Hard daily cap" subtitle={`Never more than ${dailyHardLimit} comments/day`}>
         <Slider min={1} max={15} value={dailyHardLimit} onChange={(v) => setDailyHardLimit(v)} />
       </Section>
 
+      {/* Comment Tone */}
       <Section title="Comment tone" subtitle="Persona & tone for AI-generated comments">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {[
-            ['intellectual', 'Интеллектуальный'],
-            ['friendly', 'Дружелюбный'],
-            ['provocative', 'Провокационный (для хайпа)'],
-            ['concise', 'Краткий'],
-            ['expert', 'Экспертный'],
+            ['intellectual', '🎓 Интеллектуальный'],
+            ['friendly', '😊 Дружелюбный'],
+            ['provocative', '🔥 Провокационный (хайп)'],
+            ['concise', '✂️ Краткий'],
+            ['expert', '⭐ Экспертный'],
           ].map(([value, label]) => (
             <button
               key={value}
-              className="btn btn-sm"
+              className="text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all"
               onClick={() => setTone(value)}
-              style={tone === value ? { borderColor: '#0A66C2', color: '#0A66C2', fontWeight: 600 } : {}}
+              style={tone === value
+                ? { borderColor: '#0A66C2', color: '#0A66C2', background: '#eff6ff', fontWeight: 600 }
+                : { borderColor: '#e5e7eb', color: '#475569', background: '#fff' }}
             >
               {label}
             </button>
           ))}
         </div>
+      </Section>
+
+      {/* CTA Templates */}
+      <Section title="CTA Templates" subtitle="AI weaves these into every ~10th comment organically">
+        <div className="space-y-2 mb-3">
+          {ctaTemplates.map((cta, idx) => (
+            <div key={idx} className="flex items-start gap-2 p-3 rounded-xl" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <span className="text-xs flex-1" style={{ color: '#475569' }}>{cta}</span>
+              <button className="text-xs flex-shrink-0" style={{ color: 'var(--color-danger)' }} onClick={() => removeCtaTemplate(idx)}>✕</button>
+            </div>
+          ))}
+        </div>
+        {ctaTemplates.length < 5 && (
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 border rounded-lg text-sm outline-none"
+              style={{ borderColor: '#e2e8f0' }}
+              placeholder="e.g. Кстати, мы делаем инструмент для этого..."
+              value={newCta}
+              onChange={e => setNewCta(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addCtaTemplate()}
+            />
+            <button className="btn btn-sm" onClick={addCtaTemplate}>Add</button>
+          </div>
+        )}
       </Section>
 
       {/* Likes per day */}
@@ -422,15 +528,13 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <div className="flex-1">
             <label className="text-xs" style={{ color: 'var(--color-muted)' }}>Min</label>
             <Slider min={1} max={5} value={addRange[0]} onChange={(v) => {
-              const newRange = [v, Math.max(v, addRange[1])]
-              setAddRange(newRange)
+              setAddRange([v, Math.max(v, addRange[1])])
             }} />
           </div>
           <div className="flex-1">
             <label className="text-xs" style={{ color: 'var(--color-muted)' }}>Max</label>
             <Slider min={1} max={5} value={addRange[1]} onChange={(v) => {
-              const newRange = [Math.min(addRange[0], v), v]
-              setAddRange(newRange)
+              setAddRange([Math.min(addRange[0], v), v])
             }} />
           </div>
         </div>
@@ -440,10 +544,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       <Section title="Add people by keywords">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm">Enable keyword-based search</span>
-          <Toggle
-            value={addByKeywords}
-            onChange={(v) => { setAddByKeywords(v) }}
-          />
+          <Toggle value={addByKeywords} onChange={(v) => { setAddByKeywords(v) }} />
         </div>
         {addByKeywords && (
           <TagInput
@@ -460,13 +561,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           {sessionTimes.map(time => (
             <div key={time} className="card flex items-center justify-between py-3">
               <span className="text-sm font-medium">{time}</span>
-              <button
-                className="text-xs"
-                style={{ color: 'var(--color-danger)' }}
-                onClick={() => removeSessionTime(time)}
-              >
-                Remove
-              </button>
+              <button className="text-xs" style={{ color: 'var(--color-danger)' }} onClick={() => removeSessionTime(time)}>Remove</button>
             </div>
           ))}
         </div>
@@ -484,6 +579,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         )}
       </Section>
 
+      {/* Anti-ban randomization */}
       <Section title="Anti-ban randomization" subtitle={`Start each session with random +${jitterRange[0]}…+${jitterRange[1]} min offset`}>
         <div className="flex gap-4 items-center">
           <div className="flex-1">
@@ -499,7 +595,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
       {(saveState === 'saving' || showSaved || profileLoading) && (
         <div className="fixed top-4 right-4 bg-white border rounded-lg px-3 py-2 text-xs shadow">
-          {profileLoading ? 'Loading profile...' : saveState === 'saving' ? 'Saving…' : 'Saved ✓'}
+          {profileLoading ? 'Loading profile...' : saveState === 'saving' ? 'Saving…' : '✓ Saved'}
         </div>
       )}
     </div>
