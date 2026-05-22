@@ -42,6 +42,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     onSettingsUpdate({
       linkedin: {
         ...li,
+        connected: status,
         keywords,
         comments_per_day: commentsPerDay,
         people_add_range: addRange,
@@ -202,6 +203,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         await onSettingsUpdate({
           linkedin: {
             ...li,
+            connected: status,
             keywords,
             comments_per_day: commentsPerDay,
             people_add_range: addRange,
