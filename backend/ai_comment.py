@@ -19,6 +19,14 @@ SYSTEM_PROMPT = (
     "no hashtags, no emojis, no self-promotion, add real value."
 )
 
+TONE_GUIDE = {
+    "intellectual": "Analytical and thoughtful tone with nuanced insight.",
+    "friendly": "Warm, supportive, and conversational tone.",
+    "provocative": "Bold and attention-grabbing, but still respectful and non-toxic.",
+    "concise": "Very short and direct wording.",
+    "expert": "Confident specialist tone with practical authority.",
+}
+
 
 def _get_client() -> Groq:
     global _client
@@ -35,7 +43,7 @@ def _clean_comment(text: str) -> str:
     return text.strip()
 
 
-def generate_comment(post_text: str, platform: str = "linkedin") -> str:
+def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly") -> str:
     """
     Generate a single short, genuine comment for a social media post.
     The AI automatically matches the language of the post.
@@ -43,8 +51,10 @@ def generate_comment(post_text: str, platform: str = "linkedin") -> str:
     try:
         client = _get_client()
 
+        tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
         user_prompt = (
             f"Platform: {platform.upper()}\n"
+            f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
             f"Post content:\n{post_text[:500]}\n\n"
             f"Write your comment (3-20 words, match post language):"
         )
@@ -70,7 +80,7 @@ def generate_comment(post_text: str, platform: str = "linkedin") -> str:
 
 
 def generate_comment_variants(
-    post_text: str, user_language: str = "en", platform: str = "linkedin"
+    post_text: str, user_language: str = "en", platform: str = "linkedin", tone: str = "friendly"
 ) -> dict:
     """
     Generate 3 comment variants for a post with language detection.
@@ -86,8 +96,10 @@ def generate_comment_variants(
         client = _get_client()
 
         # Step 1: Detect language and generate 3 variants
+        tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
         user_prompt = (
             f"Platform: {platform.upper()}\n"
+            f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
             f"Post content:\n{post_text[:500]}\n\n"
             f"Tasks:\n"
             f"1. Detect the language of this post (output language code like 'en', 'ru', 'es', etc.)\n"
@@ -138,7 +150,7 @@ def generate_comment_variants(
         # Pad to 3 if needed
         while len(variants) < 3:
             try:
-                extra = generate_comment(post_text, platform)
+                extra = generate_comment(post_text, platform, tone=tone)
                 variants.append(extra)
             except Exception:
                 variants.append(variants[0] if variants else "Great insight!")
@@ -188,21 +200,23 @@ def generate_comment_variants(
         logger.error(f"Groq API generate_comment_variants error: {e}")
         # Fallback: try single comment generation
         try:
-            single = generate_comment(post_text, platform)
+            single = generate_comment(post_text, platform, tone=tone)
             return {"variants": [single, single, single], "post_language": "en", "translations": None}
         except Exception:
             return {"variants": ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."], "post_language": "en", "translations": None}
 
 
-def regenerate_comment(post_text: str, previous_comment: str, platform: str = "linkedin") -> str:
+def regenerate_comment(post_text: str, previous_comment: str, platform: str = "linkedin", tone: str = "friendly") -> str:
     """
     Regenerate a different comment, explicitly avoiding the previous one.
     """
     try:
         client = _get_client()
 
+        tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
         user_prompt = (
             f"Platform: {platform.upper()}\n"
+            f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
             f"Post content:\n{post_text[:500]}\n\n"
             f"Previous comment (write something DIFFERENT): {previous_comment}\n\n"
             f"Write a new comment (3-20 words, match post language):"
