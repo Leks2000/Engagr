@@ -10,8 +10,10 @@ const LANGUAGES = [
 
 export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [step, setStep] = useState(0)
-  const [language, setLanguage] = useState('en')
+  const [language, setLanguage] = useState('')
+  const [languageConfirmed, setLanguageConfirmed] = useState(false)
   const [authUrl, setAuthUrl] = useState('')
+  const [authState, setAuthState] = useState('idle')
 
   const [liLoading, setLiLoading] = useState(false)
   const [liConnected, setLiConnected] = useState(false)
@@ -24,19 +26,20 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') === 'connected') {
+    if (params.get('linkedin') === 'connected' && languageConfirmed) {
       setLiConnected(true)
       setStep(2)
       window.history.replaceState({}, '', window.location.pathname)
     }
-  }, [])
+  }, [languageConfirmed])
 
   useEffect(() => {
     const checkConnections = async () => {
       try {
         const data = await api.get(`/api/settings/${userId}`)
-        const lang = data?.language || 'en'
+        const lang = data?.language || ''
         setLanguage(lang)
+        setLanguageConfirmed(!!data?.language)
         const linkedinConnected = !!data?.linkedin?.connected
         const redditConnected = !!data?.reddit?.connected
         setLiConnected(linkedinConnected)
@@ -56,6 +59,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     setLanguage(lang)
     try {
       await api.put(`/api/settings/${userId}`, { language: lang })
+      setLanguageConfirmed(true)
     } catch (e) {}
     setStep(1)
   }
@@ -67,6 +71,8 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     try {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
       setAuthUrl(res.url)
+      setAuthState('waiting')
+      window.open(res.url, '_blank', 'noopener,noreferrer')
     } catch (e) {
       setLiError(e.message || 'Failed to start LinkedIn OAuth')
     }
@@ -111,6 +117,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
         if (st.connected) {
           setLiConnected(true)
           setAuthUrl('')
+          setAuthState('success')
           setStep(2)
         }
       } catch {}
@@ -127,7 +134,9 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
               <p className="text-sm font-semibold">LinkedIn authorization</p>
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
-            <iframe title="LinkedIn OAuth" src={authUrl} className="oauth-frame" />
+            <div className="oauth-hint">LinkedIn opened in browser. Complete login there, then return to this app.</div>
+            {authState === 'waiting' && <div className="oauth-status">Waiting for LinkedIn callback…</div>}
+            {authState === 'success' && <div className="oauth-status">LinkedIn connected successfully.</div>}
           </div>
         </div>
       )}
@@ -166,8 +175,8 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
                 key={lang.code}
                 className="w-full flex items-center gap-3 p-4 rounded-xl border transition-all hover:bg-gray-50"
                 style={{
-                  borderColor: language === lang.code ? 'var(--color-text)' : '#eee',
-                  borderWidth: language === lang.code ? 2 : 1,
+                  borderColor: languageConfirmed && language === lang.code ? 'var(--color-text)' : '#eee',
+                  borderWidth: languageConfirmed && language === lang.code ? 2 : 1,
                 }}
                 onClick={() => handleLanguageSelect(lang.code)}
               >

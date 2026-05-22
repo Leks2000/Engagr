@@ -220,20 +220,50 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .oauth-modal {
-  width: min(560px, 100%);
-  height: min(88vh, 740px);
+  width: min(720px, 100%);
+  height: min(90vh, 760px);
   background: #fff;
-  border-radius: 14px;
-  padding: 10px;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.2);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.24);
+  border: 1px solid #ececec;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .oauth-frame {
   width: 100%;
-  height: calc(100% - 32px);
+  flex: 1;
+  min-height: 420px;
   border: none;
   border-radius: 10px;
-  background: #fff;
+  background: #fafafa;
+}
+
+.oauth-hint {
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.35;
+  background: #f8fafc;
+  border: 1px solid #e6edf5;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.oauth-status {
+  font-size: 12px;
+  color: #0a66c2;
+  background: #eef6ff;
+  border: 1px solid #d6e9ff;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.oauth-status-error {
+  color: var(--color-danger);
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
 /* ── Nav ─────────────────────────────────────── */

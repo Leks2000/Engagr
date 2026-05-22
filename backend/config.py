@@ -79,6 +79,7 @@ DEFAULT_SETTINGS = {
     "session_active": True,
     "linkedin": {
         "connected": False,
+        "proxy_url": "",
         "keywords": [],
         "comments_per_day": 5,
         "likes_per_day": 5,
