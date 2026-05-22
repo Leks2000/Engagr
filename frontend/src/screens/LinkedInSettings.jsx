@@ -10,6 +10,12 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   const [keywords, setKeywords] = useState(li.keywords || [])
   const [commentsPerDay, setCommentsPerDay] = useState(li.comments_per_day || 5)
+  const [dailyHardLimit, setDailyHardLimit] = useState(li.daily_comment_hard_limit || 10)
+  const [tone, setTone] = useState(li.tone || 'friendly')
+  const [jitterRange, setJitterRange] = useState(li.session_jitter_minutes || [3, 17])
+  const [warmupMode, setWarmupMode] = useState(li.warmup_mode ?? true)
+  const [ctaTemplates, setCtaTemplates] = useState(li.cta_templates || [])
+  const [proxyHealth, setProxyHealth] = useState(null)
   const [likesPerDay] = useState(li.likes_per_day || 5)
   const [addRange, setAddRange] = useState(li.people_add_range || [1, 3])
   const [addByKeywords, setAddByKeywords] = useState(li.add_people_by_keywords || false)
@@ -45,6 +51,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         connected: status,
         keywords,
         comments_per_day: commentsPerDay,
+        daily_comment_hard_limit: dailyHardLimit,
+        tone,
+        session_jitter_minutes: jitterRange,
+        warmup_mode: warmupMode,
+        cta_templates: ctaTemplates,
         people_add_range: addRange,
         add_people_by_keywords: addByKeywords,
         add_people_keywords: addKeywords,
@@ -206,6 +217,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             connected: status,
             keywords,
             comments_per_day: commentsPerDay,
+            daily_comment_hard_limit: dailyHardLimit,
+            tone,
+            session_jitter_minutes: jitterRange,
+            warmup_mode: warmupMode,
+            cta_templates: ctaTemplates,
             people_add_range: addRange,
             add_people_by_keywords: addByKeywords,
             add_people_keywords: addKeywords,
@@ -221,7 +237,18 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       }
     }, 1000)
     return () => clearTimeout(saveTimerRef.current)
-  }, [keywords, commentsPerDay, addRange, addByKeywords, addKeywords, sessionTimes])
+  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, warmupMode, ctaTemplates, addRange, addByKeywords, addKeywords, sessionTimes])
+
+  useEffect(() => {
+    const loadProxyHealth = async () => {
+      if (!status) return
+      try {
+        const data = await api.get(`/api/linkedin/proxy-health/${uid}`)
+        setProxyHealth(data)
+      } catch {}
+    }
+    loadProxyHealth()
+  }, [status, uid])
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
@@ -267,6 +294,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               </svg>
               <div>
                 <span className="text-sm font-medium">LinkedIn Connected</span>
+                {proxyHealth?.ok && (
+                  <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>
+                    Proxy health: {proxyHealth.latency_ms}ms · IP Trust {proxyHealth.trust_score}% ({proxyHealth.status})
+                  </p>
+                )}
                 {profileLoading ? (
                   <p className="text-xs" style={{ color: "var(--color-muted)" }}>Loading profile...</p>
                 ) : profile ? (
@@ -299,7 +331,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         ) : (
           <div className="card">
             <p className="text-[11px] mb-4" style={{ color: 'var(--color-muted)' }}>
-              We auto-select a working US proxy for LinkedIn auth and reuse it for next sessions.
+              Recommended: login via li_at session cookie. Password login may trigger 2FA/captcha.
             </p>
             <div className="flex items-start gap-3 mb-4">
               <span aria-hidden="true" style={{ color: '#0A66C2' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
@@ -367,6 +399,31 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           value={commentsPerDay}
           onChange={(v) => { setCommentsPerDay(v) }}
         />
+      </Section>
+
+      <Section title="Hard daily cap" subtitle={`Never more than ${dailyHardLimit} comments/day`}>
+        <Slider min={1} max={15} value={dailyHardLimit} onChange={(v) => setDailyHardLimit(v)} />
+      </Section>
+
+      <Section title="Comment tone" subtitle="Persona & tone for AI-generated comments">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {[
+            ['intellectual', 'Интеллектуальный'],
+            ['friendly', 'Дружелюбный'],
+            ['provocative', 'Провокационный (для хайпа)'],
+            ['concise', 'Краткий'],
+            ['expert', 'Экспертный'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className="btn btn-sm"
+              onClick={() => setTone(value)}
+              style={tone === value ? { borderColor: '#0A66C2', color: '#0A66C2', fontWeight: 600 } : {}}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </Section>
 
       {/* Likes per day */}
@@ -443,6 +500,28 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             <button className="btn btn-sm" onClick={addSessionTime}>Add</button>
           </div>
         )}
+      </Section>
+
+      <Section title="Anti-ban randomization" subtitle={`Start each session with random +${jitterRange[0]}…+${jitterRange[1]} min offset`}>
+        <div className="flex gap-4 items-center">
+          <div className="flex-1">
+            <label className="text-xs" style={{ color: 'var(--color-muted)' }}>From (min)</label>
+            <Slider min={0} max={30} value={jitterRange[0]} onChange={(v) => setJitterRange([v, Math.max(v, jitterRange[1])])} />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs" style={{ color: 'var(--color-muted)' }}>To (min)</label>
+            <Slider min={0} max={30} value={jitterRange[1]} onChange={(v) => setJitterRange([Math.min(jitterRange[0], v), v])} />
+          </div>
+        </div>
+      </Section>
+      <Section title="Warm-up mode" subtitle="Increase actions slowly for young accounts (+1 comment each 3 days)">
+        <div className="flex items-center justify-between">
+          <span className="text-sm">Enable warm-up</span>
+          <Toggle value={warmupMode} onChange={setWarmupMode} />
+        </div>
+      </Section>
+      <Section title="Custom CTA templates" subtitle="Add optional phrase; appended to each 10th generated comment">
+        <TagInput tags={ctaTemplates} onChange={setCtaTemplates} placeholder='e.g. "We are building a tool for this..."' />
       </Section>
 
       {(saveState === 'saving' || showSaved || profileLoading) && (
