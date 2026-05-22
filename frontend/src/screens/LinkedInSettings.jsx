@@ -35,6 +35,8 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [authUrl, setAuthUrl] = useState('')
   const [authState, setAuthState] = useState('idle')
   const [proxyInUse, setProxyInUse] = useState(li.proxy_url || '')
+  const authPollRef = useRef(null)
+  const authPollTimeoutRef = useRef(null)
 
   const save = () => {
     onSettingsUpdate({
@@ -63,12 +65,12 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       setAuthState('waiting')
       window.open(res.url, '_blank', 'noopener,noreferrer')
       
-      // Поллим статус каждые 2 сек пока не подключится
-      const poll = setInterval(async () => {
+      // Poll status every 2 sec until connected
+      authPollRef.current = setInterval(async () => {
         try {
           const st = await api.get(`/api/linkedin/check/${uid}`)
           if (st.connected) {
-            clearInterval(poll)
+            clearInterval(authPollRef.current)
             setStatus(true)
             setAuthUrl('')
             setAuthState('success')
@@ -80,9 +82,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         } catch {}
       }, 2000)
   
-      // Стоп через 2 минуты если не подключился
-      setTimeout(() => {
-        clearInterval(poll)
+      // Stop after 2 minutes if not connected
+      authPollTimeoutRef.current = setTimeout(() => {
+        clearInterval(authPollRef.current)
         setConnecting(false)
         setAuthState('timeout')
       }, 120000)
@@ -105,6 +107,37 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   useEffect(() => {
     setStatus(!!(settings?.linkedin?.connected))
   }, [settings])
+
+  useEffect(() => {
+    // Sync connection after OAuth callback return (app may be reopened with stale local state).
+    const params = new URLSearchParams(window.location.search)
+    const fromLinkedInCallback = params.get('linkedin') === 'connected'
+    const syncStatus = async () => {
+      try {
+        if (fromLinkedInCallback) {
+          setAuthState('waiting')
+          setAuthUrl('callback')
+        }
+        const st = await api.get(`/api/linkedin/status/${uid}`)
+        if (st.connected) {
+          setStatus(true)
+          setAuthState('success')
+          setAuthUrl('')
+          onSettingsUpdate({ linkedin: { ...li, connected: true } })
+        } else if (fromLinkedInCallback) {
+          setAuthState('timeout')
+        }
+      } catch {
+        if (fromLinkedInCallback) setAuthState('timeout')
+      }
+    }
+    syncStatus()
+  }, [uid])
+
+  useEffect(() => () => {
+    if (authPollRef.current) clearInterval(authPollRef.current)
+    if (authPollTimeoutRef.current) clearTimeout(authPollTimeoutRef.current)
+  }, [])
 
   useEffect(() => {
     const loadProfile = async () => {
