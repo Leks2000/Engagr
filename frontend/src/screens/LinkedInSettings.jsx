@@ -13,9 +13,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [dailyHardLimit, setDailyHardLimit] = useState(li.daily_comment_hard_limit || 10)
   const [tone, setTone] = useState(li.tone || 'friendly')
   const [jitterRange, setJitterRange] = useState(li.session_jitter_minutes || [3, 17])
-  const [warmupMode, setWarmupMode] = useState(li.warmup_mode ?? true)
-  const [ctaTemplates, setCtaTemplates] = useState(li.cta_templates || [])
-  const [proxyHealth, setProxyHealth] = useState(null)
   const [likesPerDay] = useState(li.likes_per_day || 5)
   const [addRange, setAddRange] = useState(li.people_add_range || [1, 3])
   const [addByKeywords, setAddByKeywords] = useState(li.add_people_by_keywords || false)
@@ -54,8 +51,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         daily_comment_hard_limit: dailyHardLimit,
         tone,
         session_jitter_minutes: jitterRange,
-        warmup_mode: warmupMode,
-        cta_templates: ctaTemplates,
         people_add_range: addRange,
         add_people_by_keywords: addByKeywords,
         add_people_keywords: addKeywords,
@@ -220,8 +215,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             daily_comment_hard_limit: dailyHardLimit,
             tone,
             session_jitter_minutes: jitterRange,
-            warmup_mode: warmupMode,
-            cta_templates: ctaTemplates,
             people_add_range: addRange,
             add_people_by_keywords: addByKeywords,
             add_people_keywords: addKeywords,
@@ -237,18 +230,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       }
     }, 1000)
     return () => clearTimeout(saveTimerRef.current)
-  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, warmupMode, ctaTemplates, addRange, addByKeywords, addKeywords, sessionTimes])
-
-  useEffect(() => {
-    const loadProxyHealth = async () => {
-      if (!status) return
-      try {
-        const data = await api.get(`/api/linkedin/proxy-health/${uid}`)
-        setProxyHealth(data)
-      } catch {}
-    }
-    loadProxyHealth()
-  }, [status, uid])
+  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, addRange, addByKeywords, addKeywords, sessionTimes])
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
@@ -513,15 +495,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             <Slider min={0} max={30} value={jitterRange[1]} onChange={(v) => setJitterRange([Math.min(jitterRange[0], v), v])} />
           </div>
         </div>
-      </Section>
-      <Section title="Warm-up mode" subtitle="Increase actions slowly for young accounts (+1 comment each 3 days)">
-        <div className="flex items-center justify-between">
-          <span className="text-sm">Enable warm-up</span>
-          <Toggle value={warmupMode} onChange={setWarmupMode} />
-        </div>
-      </Section>
-      <Section title="Custom CTA templates" subtitle="Add optional phrase; appended to each 10th generated comment">
-        <TagInput tags={ctaTemplates} onChange={setCtaTemplates} placeholder='e.g. "We are building a tool for this..."' />
       </Section>
 
       {(saveState === 'saving' || showSaved || profileLoading) && (

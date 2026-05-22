@@ -7,7 +7,6 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   const [toast, setToast] = useState('')
   const [running, setRunning] = useState(false)
   const [logs, setLogs] = useState([])
-  const [logsSupported, setLogsSupported] = useState(true)
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
@@ -17,18 +16,15 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   useEffect(() => { loadStats(); const interval = setInterval(loadStats, 30000); return () => clearInterval(interval) }, [loadStats])
   useEffect(() => {
     const loadLogs = async () => {
-      if (!logsSupported) return
       try {
         const data = await api.get(`/api/session/logs/${uid}`)
         setLogs(data?.logs || [])
-      } catch (e) {
-        if (String(e?.message || '').includes('404')) setLogsSupported(false)
-      }
+      } catch {}
     }
     loadLogs()
     const timer = setInterval(loadLogs, 5000)
     return () => clearInterval(timer)
-  }, [uid, logsSupported])
+  }, [uid])
 
   const isActive = settings?.session_active !== false
   const toggleSession = async () => {
@@ -114,7 +110,7 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
       <div className="card mt-4">
         <p className="text-sm font-semibold mb-2">Live session log</p>
         <div className="text-xs" style={{ maxHeight: 180, overflowY: 'auto', color: 'var(--color-muted)' }}>
-          {!logsSupported ? <p>Log endpoint is not available on this backend yet.</p> : logs.length ? logs.slice(-12).map((l, i) => <p key={i}>{l}</p>) : <p>No events yet.</p>}
+          {logs.length ? logs.slice(-12).map((l, i) => <p key={i}>{l}</p>) : <p>No events yet.</p>}
         </div>
       </div>
     </div>

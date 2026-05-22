@@ -170,7 +170,7 @@ async def run_linkedin_session(user_id: str):
             _log(user_id, f"Warm-up mode active: daily comments cap={configured_comments}")
 
         remaining_comments = min(
-            configured_comments,
+            li_settings.get("comments_per_day", 5),
             li_settings.get("daily_comment_hard_limit", 10),
             DAILY_LIMITS["linkedin_comments"] - stats.get("linkedin_comments", 0)
         )
@@ -179,15 +179,7 @@ async def run_linkedin_session(user_id: str):
         # Generate comments and add to queue
         for post in posts[:remaining_comments]:
             try:
-                cta = ""
-                generated_so_far = stats.get("linkedin_comments", 0) + len([q for q in storage.get_queue(user_id) if q.get("platform") == "linkedin"])
-                templates = li_settings.get("cta_templates", []) or []
-                if templates and (generated_so_far + 1) % 10 == 0:
-                    cta = random.choice(templates)
                 comment = ai_comment.generate_comment(post["text"], "linkedin", tone=li_settings.get("tone", "friendly"))
-                if cta:
-                    comment = f"{comment} {cta}".strip()
-                _log(user_id, f"Post found by keyword. Generated {li_settings.get('tone', 'friendly')} comment.")
                 
                 queue_item = {
                     "id": str(uuid.uuid4()),
