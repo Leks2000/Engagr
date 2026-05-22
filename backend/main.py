@@ -126,6 +126,13 @@ def get_stats(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@api.route("/api/session/logs/<user_id>", methods=["GET"])
+def session_logs(user_id):
+    try:
+        return jsonify({"logs": sched_module.get_session_logs(user_id)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ── Queue Endpoints ───────────────────────────────────
 
@@ -218,10 +225,13 @@ def regenerate_item(user_id, item_id):
         if not item:
             return jsonify({"error": "Item not found"}), 404
 
+        settings = storage.get_settings(user_id)
+        tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
         new_comment = ai_comment.regenerate_comment(
             item.get("post_text", ""),
             item.get("comment", ""),
             item.get("platform", "linkedin"),
+            tone=tone,
         )
 
         storage.update_queue_item(user_id, item_id, {"comment": new_comment})
@@ -298,6 +308,21 @@ def linkedin_status(user_id):
 
     storage.update_settings(user_id, {"linkedin": {"connected": connected}})
     return jsonify({"connected": connected})
+
+@api.route("/api/linkedin/proxy-health/<user_id>", methods=["GET"])
+def linkedin_proxy_health(user_id):
+    import time
+    proxy = (_linkedin_proxies(user_id) or {}).get("http")
+    if not proxy:
+        return jsonify({"ok": False, "message": "No proxy configured"})
+    try:
+        started = time.perf_counter()
+        resp = requests.get("https://www.linkedin.com", timeout=10, proxies={"http": proxy, "https": proxy})
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        trust = max(50, min(99, 99 - latency_ms // 80))
+        return jsonify({"ok": resp.status_code < 500, "latency_ms": latency_ms, "trust_score": trust, "status": "Safe" if trust >= 80 else "Risky"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
 
 
 @api.route("/api/linkedin/disconnect/<user_id>", methods=["POST"])
@@ -528,7 +553,7 @@ def run_session_now(user_id):
         settings = storage.get_settings(user_id)
         li_cfg = settings.get("linkedin", {})
         keywords = li_cfg.get("keywords", []) or []
-        max_posts = li_cfg.get("comments_per_day", 5)
+        max_posts = min(li_cfg.get("comments_per_day", 5), li_cfg.get("daily_comment_hard_limit", 10))
         user_language = settings.get("language", "en")
 
         auth = linkedin._load_auth(user_id)
@@ -549,7 +574,7 @@ def run_session_now(user_id):
 
             # Generate 3 comment variants with language detection
             comment_data = ai_comment.generate_comment_variants(
-                post_text, user_language, "linkedin"
+                post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly")
             )
             variants = comment_data.get("variants", [])
             if not variants:
