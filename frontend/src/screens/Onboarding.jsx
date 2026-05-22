@@ -27,12 +27,11 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') === 'connected' && languageConfirmed) {
+    if (params.get('linkedin') === 'connected') {
       setLiConnected(true)
-      setStep(2)
       window.history.replaceState({}, '', window.location.pathname)
     }
-  }, [languageConfirmed])
+  }, [])
 
   useEffect(() => {
     const checkConnections = async () => {
@@ -45,12 +44,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
         const redditConnected = !!data?.reddit?.connected
         setLiConnected(linkedinConnected)
         setRdConnected(redditConnected)
-        if (!data?.language) {
-          setStep(0)
-          return
-        }
-        if (linkedinConnected && !redditConnected) setStep(2)
-        if (!linkedinConnected) setStep(1)
+        setStep(0)
       } catch (e) {}
     }
     checkConnections()
@@ -62,6 +56,10 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
       await api.put(`/api/settings/${userId}`, { language: lang })
       setLanguageConfirmed(true)
     } catch (e) {}
+  }
+
+  const handleLanguageContinue = () => {
+    if (!languageConfirmed || !language) return
     setStep(1)
   }
 
@@ -188,6 +186,17 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
               </button>
             ))}
           </div>
+          <button
+            className="btn w-full mt-6"
+            onClick={handleLanguageContinue}
+            disabled={!languageConfirmed || !language}
+            style={{
+              opacity: (!languageConfirmed || !language) ? 0.5 : 1,
+              cursor: (!languageConfirmed || !language) ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Continue →
+          </button>
         </div>
       )}
 
