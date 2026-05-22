@@ -11,12 +11,19 @@ const QUEUE_I18N = {
 
 export default function Queue({ userId, language = 'en' }) {
   const [queue, setQueue] = useState([])
+  const [platformFilter, setPlatformFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
   const t = QUEUE_I18N[language] || QUEUE_I18N.en
+  const filteredQueue = queue.filter((item) => platformFilter === 'all' ? true : item.platform === platformFilter)
+  const counts = {
+    all: queue.length,
+    linkedin: queue.filter((i) => i.platform === 'linkedin').length,
+    reddit: queue.filter((i) => i.platform === 'reddit').length,
+  }
 
   const loadQueue = useCallback(async () => {
     if (!loading) setRefreshing(true)
@@ -122,7 +129,7 @@ export default function Queue({ userId, language = 'en' }) {
         <div>
           <h1 className="text-xl font-bold tracking-tight queue-title-animate">🗂️ {t.title}</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-            {queue.length} {t.pending}
+            {filteredQueue.length} {t.pending}
           </p>
           <p className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>
             {refreshing ? `⏳ ${t.updating}...` : `${t.last}: ${lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}`}
@@ -132,8 +139,24 @@ export default function Queue({ userId, language = 'en' }) {
           ↻ {t.refresh}
         </button>
       </div>
+      <div className="flex gap-2 mb-4">
+        {[
+          ['all', `All (${counts.all})`],
+          ['linkedin', `LinkedIn (${counts.linkedin})`],
+          ['reddit', `Reddit (${counts.reddit})`],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            className="queue-filter-btn"
+            data-active={platformFilter === key}
+            onClick={() => setPlatformFilter(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {queue.length === 0 ? (
+      {filteredQueue.length === 0 ? (
         <div className="text-center py-16 empty-state">
           <div className="empty-illu">🧾✨</div>
           <p className="text-base font-semibold mb-1">{t.emptyTitle}</p>
@@ -143,7 +166,7 @@ export default function Queue({ userId, language = 'en' }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {queue.map((item, i) => (
+          {filteredQueue.map((item, i) => (
             <div
               key={item.id}
               className="animate-slide-up"
