@@ -34,6 +34,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger("engagr")
 
+LINKEDIN_PROXY_POOL = [
+    "http://jgonrihk:waie52nyin2x@23.95.150.145:6114",
+    "http://jgonrihk:waie52nyin2x@38.154.203.95:5863",
+    "http://jgonrihk:waie52nyin2x@198.23.243.226:6361",
+    "http://jgonrihk:waie52nyin2x@209.127.138.10:5784",
+    "http://jgonrihk:waie52nyin2x@38.154.185.97:6370",
+    "http://jgonrihk:waie52nyin2x@50.114.82.8:6992",
+    "http://jgonrihk:waie52nyin2x@198.105.121.200:6462",
+    "http://jgonrihk:waie52nyin2x@64.137.96.74:6641",
+    "http://jgonrihk:waie52nyin2x@84.247.60.125:6095",
+    "http://jgonrihk:waie52nyin2x@142.111.67.146:5611",
+]
+
+
+def _linkedin_proxies(user_id: str) -> dict | None:
+    try:
+        settings = storage.get_settings(user_id)
+        proxy = ((settings.get("linkedin") or {}).get("proxy_url") or "").strip()
+        if proxy:
+            return {"http": proxy, "https": proxy}
+    except Exception:
+        pass
+    return None
+
+
+def _pick_working_linkedin_proxy(user_id: str) -> str:
+    settings = storage.get_settings(user_id)
+    saved_proxy = ((settings.get("linkedin") or {}).get("proxy_url") or "").strip()
+    candidates = [saved_proxy] if saved_proxy else []
+    candidates.extend([p for p in LINKEDIN_PROXY_POOL if p != saved_proxy])
+    for proxy in candidates:
+        try:
+            resp = requests.get(
+                "https://www.linkedin.com/oauth/v2/authorization",
+                params={"response_type": "code", "client_id": "ping", "redirect_uri": "https://example.com", "state": "ping"},
+                timeout=8,
+                proxies={"http": proxy, "https": proxy},
+                allow_redirects=True,
+            )
+            if resp.status_code in (200, 301, 302, 303):
+                storage.update_settings(user_id, {"linkedin": {"proxy_url": proxy}})
+                logger.info("LinkedIn proxy selected user=%s proxy=%s", user_id, proxy)
+                return proxy
+        except Exception:
+            continue
+    return saved_proxy
+
 # ── Flask API (for Mini App) ──────────────────────────
 
 api = Flask(__name__)
@@ -344,8 +391,9 @@ def reddit_disconnect(user_id):
 @api.route("/api/linkedin/auth/<user_id>", methods=["GET"])
 def linkedin_auth(user_id):
     from config import LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI
+    selected_proxy = _pick_working_linkedin_proxy(user_id)
     params = urlencode({"response_type": "code", "client_id": LINKEDIN_CLIENT_ID, "redirect_uri": LINKEDIN_REDIRECT_URI, "state": user_id, "scope": "openid profile email w_member_social"})
-    return jsonify({"url": f"https://www.linkedin.com/oauth/v2/authorization?{params}"})
+    return jsonify({"url": f"https://www.linkedin.com/oauth/v2/authorization?{params}", "proxy": selected_proxy})
 
 
 @api.route("/api/linkedin/callback", methods=["GET"])
@@ -358,7 +406,7 @@ def linkedin_callback():
     if not code or not user_id:
         return jsonify({"error": "code and state are required"}), 400
     try:
-        resp = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={"grant_type": "authorization_code", "code": code, "redirect_uri": LINKEDIN_REDIRECT_URI, "client_id": LINKEDIN_CLIENT_ID, "client_secret": LINKEDIN_CLIENT_SECRET}, timeout=20)
+        resp = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={"grant_type": "authorization_code", "code": code, "redirect_uri": LINKEDIN_REDIRECT_URI, "client_id": LINKEDIN_CLIENT_ID, "client_secret": LINKEDIN_CLIENT_SECRET}, timeout=20, proxies=_linkedin_proxies(user_id))
         data = resp.json()
         token = data.get("access_token", "")
         if not token:
@@ -382,7 +430,8 @@ def linkedin_profile(user_id):
             return jsonify({"connected": False, "name": "", "headline": "", "email": "", "picture_url": ""})
 
         headers = {"Authorization": f"Bearer {token}"}
-        me_resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
+        proxies = _linkedin_proxies(user_id)
+        me_resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20, proxies=proxies)
         if me_resp.status_code != 200:
             return jsonify({"connected": False, "name": "", "headline": "", "email": "", "picture_url": ""})
 
@@ -391,6 +440,7 @@ def linkedin_profile(user_id):
             "https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))",
             headers=headers,
             timeout=20,
+            proxies=proxies,
         )
 
         email = ""

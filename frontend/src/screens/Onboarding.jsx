@@ -10,8 +10,12 @@ const LANGUAGES = [
 
 export default function Onboarding({ userId, onComplete, onOpenReddit }) {
   const [step, setStep] = useState(0)
-  const [language, setLanguage] = useState('en')
+  const [language, setLanguage] = useState('')
+  const [languageConfirmed, setLanguageConfirmed] = useState(false)
   const [authUrl, setAuthUrl] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [proxyInUse, setProxyInUse] = useState('')
 
   const [liLoading, setLiLoading] = useState(false)
   const [liConnected, setLiConnected] = useState(false)
@@ -24,19 +28,20 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    if (params.get('linkedin') === 'connected') {
+    if (params.get('linkedin') === 'connected' && languageConfirmed) {
       setLiConnected(true)
       setStep(2)
       window.history.replaceState({}, '', window.location.pathname)
     }
-  }, [])
+  }, [languageConfirmed])
 
   useEffect(() => {
     const checkConnections = async () => {
       try {
         const data = await api.get(`/api/settings/${userId}`)
-        const lang = data?.language || 'en'
+        const lang = data?.language || ''
         setLanguage(lang)
+        setLanguageConfirmed(!!data?.language)
         const linkedinConnected = !!data?.linkedin?.connected
         const redditConnected = !!data?.reddit?.connected
         setLiConnected(linkedinConnected)
@@ -56,6 +61,7 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     setLanguage(lang)
     try {
       await api.put(`/api/settings/${userId}`, { language: lang })
+      setLanguageConfirmed(true)
     } catch (e) {}
     setStep(1)
   }
@@ -67,6 +73,10 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
     try {
       const res = await api.get(`/api/linkedin/auth/${userId}`)
       setAuthUrl(res.url)
+      setProxyInUse(res.proxy || '')
+      setAuthLoading(true)
+      setAuthError('')
+      window.open(res.url, '_blank', 'noopener,noreferrer')
     } catch (e) {
       setLiError(e.message || 'Failed to start LinkedIn OAuth')
     }
@@ -127,7 +137,20 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
               <p className="text-sm font-semibold">LinkedIn authorization</p>
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
-            <iframe title="LinkedIn OAuth" src={authUrl} className="oauth-frame" />
+            <div className="oauth-hint">If LinkedIn blocks embedded auth, continue in the opened browser tab.</div>
+            {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
+            {authLoading && <div className="oauth-status">Loading LinkedIn authorization…</div>}
+            {authError && <div className="oauth-status oauth-status-error">{authError}</div>}
+            <iframe
+              title="LinkedIn OAuth"
+              src={authUrl}
+              className="oauth-frame"
+              onLoad={() => setAuthLoading(false)}
+              onError={() => {
+                setAuthLoading(false)
+                setAuthError('Unable to load inside modal. Continue using external browser sign-in.')
+              }}
+            />
           </div>
         </div>
       )}
@@ -166,8 +189,8 @@ export default function Onboarding({ userId, onComplete, onOpenReddit }) {
                 key={lang.code}
                 className="w-full flex items-center gap-3 p-4 rounded-xl border transition-all hover:bg-gray-50"
                 style={{
-                  borderColor: language === lang.code ? 'var(--color-text)' : '#eee',
-                  borderWidth: language === lang.code ? 2 : 1,
+                  borderColor: languageConfirmed && language === lang.code ? 'var(--color-text)' : '#eee',
+                  borderWidth: languageConfirmed && language === lang.code ? 2 : 1,
                 }}
                 onClick={() => handleLanguageSelect(lang.code)}
               >

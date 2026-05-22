@@ -7,6 +7,7 @@ import requests
 from linkedin_api import Linkedin
 
 from config import WEBSHARE_PROXY_URL, linkedin_cookies_path
+import storage
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,7 @@ def _save_auth(user_id: str, auth_data: dict) -> None:
 
 def verify_li_at(user_id: str, li_at: str) -> bool:
     try:
-        proxies = None
-        if WEBSHARE_PROXY_URL:
-            proxies = {"http": WEBSHARE_PROXY_URL, "https": WEBSHARE_PROXY_URL}
+        proxies = _proxy_dict(user_id)
         client = Linkedin("", "", cookies={"li_at": li_at}, proxies=proxies)
         profile = client.get_profile("me")
         _clients[user_id] = client
@@ -45,6 +44,24 @@ def verify_li_at(user_id: str, li_at: str) -> bool:
     except Exception as e:
         logger.error("LinkedIn verify_li_at failed user=%s: %s", user_id, e)
         return False
+
+
+def _proxy_url(user_id: str) -> str:
+    try:
+        settings = storage.get_settings(user_id)
+        user_proxy = ((settings.get("linkedin") or {}).get("proxy_url") or "").strip()
+        if user_proxy:
+            return user_proxy
+    except Exception:
+        pass
+    return (WEBSHARE_PROXY_URL or "").strip()
+
+
+def _proxy_dict(user_id: str) -> dict | None:
+    proxy = _proxy_url(user_id)
+    if not proxy:
+        return None
+    return {"http": proxy, "https": proxy}
 
 
 def _extract_activity_urn(post_url: str) -> str | None:
@@ -69,7 +86,7 @@ def _post_url_from_urn(activity_urn: str) -> str:
 
 def login_with_playwright(user_id: str, email: str, password: str) -> tuple[bool, str]:
     try:
-        client = Linkedin(email, password)
+        client = Linkedin(email, password, proxies=_proxy_dict(user_id))
         profile = client.get_profile("me")
         _clients[user_id] = client
         _profile_ids[user_id] = profile.get("profile_id") or profile.get("public_id") or ""
@@ -94,8 +111,9 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
         return verify_li_at(uid, auth["li_at"])
     if auth.get("access_token"):
         headers = {"Authorization": f"Bearer {auth['access_token']}"}
+        proxies = _proxy_dict(uid)
         try:
-            resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20)
+            resp = requests.get("https://api.linkedin.com/v2/me", headers=headers, timeout=20, proxies=proxies)
             return resp.status_code == 200
         except Exception:
             return False
@@ -210,6 +228,7 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
     }
+    proxies = _proxy_dict(user_id)
 
     all_items = []
 
@@ -220,6 +239,7 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
             headers=headers,
             params={"q": "authors", "count": 50},
             timeout=20,
+            proxies=proxies,
         )
         if resp.status_code == 200:
             all_items.extend(resp.json().get("elements", []))
@@ -233,6 +253,7 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
             headers=headers,
             params={"q": "owners", "count": 20},
             timeout=20,
+            proxies=proxies,
         )
         if resp2.status_code == 200:
             all_items.extend(resp2.json().get("elements", []))
@@ -276,6 +297,7 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
                     f"https://api.linkedin.com/v2/people/{author_urn.split(':')[-1]}",
                     headers=headers,
                     timeout=10,
+                    proxies=proxies,
                 )
                 if profile_resp.status_code == 200:
                     pdata = profile_resp.json()
@@ -319,11 +341,13 @@ def get_profile_picture(user_id: str) -> str:
         return ""
 
     headers = {"Authorization": f"Bearer {token}"}
+    proxies = _proxy_dict(user_id)
     try:
         resp = requests.get(
             "https://api.linkedin.com/v2/me?projection=(id,profilePicture(displayImage~:playableStreams))",
             headers=headers,
             timeout=20,
+            proxies=proxies,
         )
         if resp.status_code != 200:
             return ""

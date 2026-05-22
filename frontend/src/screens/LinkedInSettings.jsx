@@ -33,6 +33,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
   const [authUrl, setAuthUrl] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [proxyInUse, setProxyInUse] = useState(li.proxy_url || '')
 
   const save = () => {
     onSettingsUpdate({
@@ -57,6 +60,10 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       setAuthUrl(res.url)
+      setProxyInUse(res.proxy || '')
+      setAuthLoading(true)
+      setAuthError('')
+      window.open(res.url, '_blank', 'noopener,noreferrer')
       
       // Поллим статус каждые 2 сек пока не подключится
       const poll = setInterval(async () => {
@@ -188,7 +195,20 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
               <p className="text-sm font-semibold">LinkedIn authorization</p>
               <button className="text-sm" onClick={() => setAuthUrl('')}>✕</button>
             </div>
-            <iframe title="LinkedIn OAuth" src={authUrl} className="oauth-frame" />
+            <div className="oauth-hint">If the embedded page is blocked, finish sign-in in the browser tab that opened automatically.</div>
+            {!!proxyInUse && <div className="oauth-status">Proxy in use: {proxyInUse}</div>}
+            {authLoading && <div className="oauth-status">Loading LinkedIn authorization…</div>}
+            {authError && <div className="oauth-status oauth-status-error">{authError}</div>}
+            <iframe
+              title="LinkedIn OAuth"
+              src={authUrl}
+              className="oauth-frame"
+              onLoad={() => setAuthLoading(false)}
+              onError={() => {
+                setAuthLoading(false)
+                setAuthError('Unable to load inside modal. Continue using external browser sign-in.')
+              }}
+            />
           </div>
         </div>
       )}
@@ -250,6 +270,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           </div>
         ) : (
           <div className="card">
+            <p className="text-[11px] mb-4" style={{ color: 'var(--color-muted)' }}>
+              We auto-select a working US proxy for LinkedIn auth and reuse it for next sessions.
+            </p>
             <div className="flex items-start gap-3 mb-4">
               <span aria-hidden="true" style={{ color: '#0A66C2' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
               <div>
