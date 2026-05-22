@@ -218,10 +218,13 @@ def regenerate_item(user_id, item_id):
         if not item:
             return jsonify({"error": "Item not found"}), 404
 
+        settings = storage.get_settings(user_id)
+        tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
         new_comment = ai_comment.regenerate_comment(
             item.get("post_text", ""),
             item.get("comment", ""),
             item.get("platform", "linkedin"),
+            tone=tone,
         )
 
         storage.update_queue_item(user_id, item_id, {"comment": new_comment})
@@ -528,7 +531,7 @@ def run_session_now(user_id):
         settings = storage.get_settings(user_id)
         li_cfg = settings.get("linkedin", {})
         keywords = li_cfg.get("keywords", []) or []
-        max_posts = li_cfg.get("comments_per_day", 5)
+        max_posts = min(li_cfg.get("comments_per_day", 5), li_cfg.get("daily_comment_hard_limit", 10))
         user_language = settings.get("language", "en")
 
         auth = linkedin._load_auth(user_id)
@@ -549,7 +552,7 @@ def run_session_now(user_id):
 
             # Generate 3 comment variants with language detection
             comment_data = ai_comment.generate_comment_variants(
-                post_text, user_language, "linkedin"
+                post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly")
             )
             variants = comment_data.get("variants", [])
             if not variants:

@@ -10,6 +10,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   const [keywords, setKeywords] = useState(li.keywords || [])
   const [commentsPerDay, setCommentsPerDay] = useState(li.comments_per_day || 5)
+  const [dailyHardLimit, setDailyHardLimit] = useState(li.daily_comment_hard_limit || 10)
+  const [tone, setTone] = useState(li.tone || 'friendly')
+  const [jitterRange, setJitterRange] = useState(li.session_jitter_minutes || [3, 17])
   const [likesPerDay] = useState(li.likes_per_day || 5)
   const [addRange, setAddRange] = useState(li.people_add_range || [1, 3])
   const [addByKeywords, setAddByKeywords] = useState(li.add_people_by_keywords || false)
@@ -45,6 +48,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         connected: status,
         keywords,
         comments_per_day: commentsPerDay,
+        daily_comment_hard_limit: dailyHardLimit,
+        tone,
+        session_jitter_minutes: jitterRange,
         people_add_range: addRange,
         add_people_by_keywords: addByKeywords,
         add_people_keywords: addKeywords,
@@ -206,6 +212,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             connected: status,
             keywords,
             comments_per_day: commentsPerDay,
+            daily_comment_hard_limit: dailyHardLimit,
+            tone,
+            session_jitter_minutes: jitterRange,
             people_add_range: addRange,
             add_people_by_keywords: addByKeywords,
             add_people_keywords: addKeywords,
@@ -221,7 +230,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       }
     }, 1000)
     return () => clearTimeout(saveTimerRef.current)
-  }, [keywords, commentsPerDay, addRange, addByKeywords, addKeywords, sessionTimes])
+  }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, addRange, addByKeywords, addKeywords, sessionTimes])
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
@@ -369,6 +378,31 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         />
       </Section>
 
+      <Section title="Hard daily cap" subtitle={`Never more than ${dailyHardLimit} comments/day`}>
+        <Slider min={1} max={15} value={dailyHardLimit} onChange={(v) => setDailyHardLimit(v)} />
+      </Section>
+
+      <Section title="Comment tone" subtitle="Persona & tone for AI-generated comments">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {[
+            ['intellectual', 'Интеллектуальный'],
+            ['friendly', 'Дружелюбный'],
+            ['provocative', 'Провокационный (для хайпа)'],
+            ['concise', 'Краткий'],
+            ['expert', 'Экспертный'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className="btn btn-sm"
+              onClick={() => setTone(value)}
+              style={tone === value ? { borderColor: '#0A66C2', color: '#0A66C2', fontWeight: 600 } : {}}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </Section>
+
       {/* Likes per day */}
       <Section title="Likes per day" subtitle="Fixed at 5 (maximum safe limit)">
         <div className="card text-center py-3">
@@ -443,6 +477,19 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             <button className="btn btn-sm" onClick={addSessionTime}>Add</button>
           </div>
         )}
+      </Section>
+
+      <Section title="Anti-ban randomization" subtitle={`Start each session with random +${jitterRange[0]}…+${jitterRange[1]} min offset`}>
+        <div className="flex gap-4 items-center">
+          <div className="flex-1">
+            <label className="text-xs" style={{ color: 'var(--color-muted)' }}>From (min)</label>
+            <Slider min={0} max={30} value={jitterRange[0]} onChange={(v) => setJitterRange([v, Math.max(v, jitterRange[1])])} />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs" style={{ color: 'var(--color-muted)' }}>To (min)</label>
+            <Slider min={0} max={30} value={jitterRange[1]} onChange={(v) => setJitterRange([Math.min(jitterRange[0], v), v])} />
+          </div>
+        </div>
       </Section>
 
       {(saveState === 'saving' || showSaved || profileLoading) && (

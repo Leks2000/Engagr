@@ -74,6 +74,13 @@ def schedule_user_sessions(user_id: str):
         for i, time_str in enumerate(li_settings.get("session_times", [])):
             try:
                 hour, minute = map(int, time_str.split(":"))
+                jitter = li_settings.get("session_jitter_minutes", [3, 17])
+                jitter_min = int(jitter[0]) if isinstance(jitter, list) and len(jitter) > 0 else 3
+                jitter_max = int(jitter[1]) if isinstance(jitter, list) and len(jitter) > 1 else max(jitter_min, 17)
+                offset = random.randint(min(jitter_min, jitter_max), max(jitter_min, jitter_max))
+                total_minutes = hour * 60 + minute + offset
+                hour = (total_minutes // 60) % 24
+                minute = total_minutes % 60
                 job_id = f"session_{user_id}_linkedin_{i}"
                 scheduler.add_job(
                     run_linkedin_session,
@@ -141,13 +148,14 @@ async def run_linkedin_session(user_id: str):
         # Calculate how many comments we can still post today
         remaining_comments = min(
             li_settings.get("comments_per_day", 5),
+            li_settings.get("daily_comment_hard_limit", 10),
             DAILY_LIMITS["linkedin_comments"] - stats.get("linkedin_comments", 0)
         )
         
         # Generate comments and add to queue
         for post in posts[:remaining_comments]:
             try:
-                comment = ai_comment.generate_comment(post["text"], "linkedin")
+                comment = ai_comment.generate_comment(post["text"], "linkedin", tone=li_settings.get("tone", "friendly"))
                 
                 queue_item = {
                     "id": str(uuid.uuid4()),

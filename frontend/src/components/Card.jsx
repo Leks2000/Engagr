@@ -48,6 +48,12 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
 
       {/* Post Excerpt */}
       <div className="queue-card-excerpt">
+        <p style={{ fontWeight: 600, marginBottom: 6 }}>Original post context</p>
+        {item.post_text && (
+          <p style={{ marginBottom: 8, opacity: 0.9 }}>
+            {item.post_text.length > 280 ? `${item.post_text.slice(0, 280)}…` : item.post_text}
+          </p>
+        )}
         <p>{item.post_excerpt || item.excerpt || ''}</p>
       </div>
 
