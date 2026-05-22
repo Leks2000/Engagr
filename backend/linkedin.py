@@ -224,6 +224,9 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
     if not token:
         return []
 
+    normalized_keywords = [k.strip() for k in (keywords or []) if str(k).strip()]
+    keyword_query = " OR ".join(normalized_keywords)
+
     headers = {
         "Authorization": f"Bearer {token}",
         "X-Restli-Protocol-Version": "2.0.0",
@@ -231,37 +234,116 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
     proxies = _proxy_dict(user_id)
 
     all_items = []
+    me_id = ""
+    me_urn = ""
+
+    logger.info(
+        "linkedin oauth scrape start user=%s keyword_count=%s query=%r max_posts=%s has_proxy=%s",
+        user_id,
+        len(normalized_keywords),
+        keyword_query,
+        max_posts,
+        bool(proxies),
+    )
+
+    # Resolve member id first to build valid author/owner filters.
+    try:
+        me_endpoint = "https://api.linkedin.com/v2/me"
+        me_resp = requests.get(me_endpoint, headers=headers, timeout=20, proxies=proxies)
+        me_preview = me_resp.text[:800].replace("\n", " ")
+        logger.info(
+            "linkedin oauth endpoint=%s status=%s body_preview=%r",
+            me_endpoint,
+            me_resp.status_code,
+            me_preview,
+        )
+        if me_resp.status_code == 200:
+            me_id = (me_resp.json() or {}).get("id", "")
+            me_urn = f"urn:li:person:{me_id}" if me_id else ""
+    except Exception as e:
+        logger.error("LinkedIn /me fetch failed user=%s: %s", user_id, e)
 
     # Fetch user's feed posts (ugcPosts)
     try:
+        ugc_endpoint = "https://api.linkedin.com/v2/ugcPosts"
+        ugc_params = {"q": "authors", "count": 50}
+        if me_urn:
+            ugc_params["authors"] = f"List({me_urn})"
+        logger.info(
+            "linkedin oauth request endpoint=%s params=%s keywords=%r",
+            ugc_endpoint,
+            ugc_params,
+            normalized_keywords,
+        )
         resp = requests.get(
-            "https://api.linkedin.com/v2/ugcPosts",
+            ugc_endpoint,
             headers=headers,
-            params={"q": "authors", "count": 50},
+            params=ugc_params,
             timeout=20,
             proxies=proxies,
         )
+        ugc_preview = resp.text[:1200].replace("\n", " ")
+        logger.info(
+            "linkedin oauth response endpoint=%s status=%s body_preview=%r",
+            ugc_endpoint,
+            resp.status_code,
+            ugc_preview,
+        )
         if resp.status_code == 200:
             all_items.extend(resp.json().get("elements", []))
+        else:
+            logger.warning(
+                "linkedin oauth ugcPosts non-200 user=%s status=%s; this token may not have required product scope",
+                user_id,
+                resp.status_code,
+            )
     except Exception as e:
         logger.error("LinkedIn ugcPosts fetch failed user=%s: %s", user_id, e)
 
     # Also try fetching feed/shares for broader content
     try:
+        shares_endpoint = "https://api.linkedin.com/v2/shares"
+        shares_params = {"q": "owners", "count": 20}
+        if me_urn:
+            shares_params["owners"] = f"List({me_urn})"
+        logger.info(
+            "linkedin oauth request endpoint=%s params=%s",
+            shares_endpoint,
+            shares_params,
+        )
         resp2 = requests.get(
-            "https://api.linkedin.com/v2/shares",
+            shares_endpoint,
             headers=headers,
-            params={"q": "owners", "count": 20},
+            params=shares_params,
             timeout=20,
             proxies=proxies,
+        )
+        shares_preview = resp2.text[:1200].replace("\n", " ")
+        logger.info(
+            "linkedin oauth response endpoint=%s status=%s body_preview=%r",
+            shares_endpoint,
+            resp2.status_code,
+            shares_preview,
         )
         if resp2.status_code == 200:
             all_items.extend(resp2.json().get("elements", []))
     except Exception as e:
         logger.debug("LinkedIn shares fetch failed (non-critical): %s", e)
 
+    logger.info(
+        "linkedin oauth aggregate user=%s total_items=%s me_id=%s me_urn=%s",
+        user_id,
+        len(all_items),
+        bool(me_id),
+        me_urn or "(empty)",
+    )
+
     posts = []
     seen_ids = set()
+    empty_text_count = 0
+    keyword_filtered_count = 0
+    duplicate_count = 0
+    low_reaction_filtered_count = 0
 
     for item in all_items:
         # Extract text from UGC format
@@ -276,14 +358,17 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
             text = item.get("text", {}).get("text", "") if isinstance(item.get("text"), dict) else ""
 
         if not text:
+            empty_text_count += 1
             continue
 
         # Filter by keywords
-        if keywords and not any(k.lower() in text.lower() for k in keywords):
+        if normalized_keywords and not any(k.lower() in text.lower() for k in normalized_keywords):
+            keyword_filtered_count += 1
             continue
 
         post_id = item.get("id", "")
         if post_id in seen_ids:
+            duplicate_count += 1
             continue
         seen_ids.add(post_id)
 
@@ -316,6 +401,7 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
         # Filter out posts with less than 3 reactions (skip for now if we can't get count)
         # Only filter if we actually got social data
         if social_detail and reactions_count < 3:
+            low_reaction_filtered_count += 1
             continue
 
         posts.append({
@@ -330,6 +416,21 @@ def scrape_posts_oauth(user_id: str, keywords: list[str], max_posts: int = 10) -
 
         if len(posts) >= max_posts:
             break
+
+    if not posts:
+        logger.warning(
+            "linkedin oauth posts empty user=%s reason_stats={all_items:%s, empty_text:%s, keyword_filtered:%s, duplicates:%s, low_reactions:%s, keywords:%r}. "
+            "OAuth member tokens often return only the member's own posts (not global keyword search).",
+            user_id,
+            len(all_items),
+            empty_text_count,
+            keyword_filtered_count,
+            duplicate_count,
+            low_reaction_filtered_count,
+            normalized_keywords,
+        )
+    else:
+        logger.info("linkedin oauth posts built user=%s posts=%s", user_id, len(posts))
 
     return posts[:max_posts]
 
