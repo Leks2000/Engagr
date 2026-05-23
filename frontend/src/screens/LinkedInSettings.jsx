@@ -14,8 +14,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [tone, setTone] = useState(li.tone || 'friendly')
   const [jitterRange, setJitterRange] = useState(li.session_jitter_minutes || [3, 17])
   const [warmupMode, setWarmupMode] = useState(li.warmup_mode ?? true)
-  const [ctaTemplates, setCtaTemplates] = useState(li.cta_templates || [])
-  const [proxyHealth, setProxyHealth] = useState(null)
   const [likesPerDay] = useState(li.likes_per_day || 5)
   const [addRange, setAddRange] = useState(li.people_add_range || [1, 3])
   const [addByKeywords, setAddByKeywords] = useState(li.add_people_by_keywords || false)
@@ -47,27 +45,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [proxyInUse, setProxyInUse] = useState(li.proxy_url || '')
   const authPollRef = useRef(null)
   const authPollTimeoutRef = useRef(null)
-
-  const save = () => {
-    onSettingsUpdate({
-      linkedin: {
-        ...li,
-        connected: status,
-        keywords,
-        comments_per_day: commentsPerDay,
-        daily_comment_hard_limit: dailyHardLimit,
-        tone,
-        session_jitter_minutes: jitterRange,
-        warmup_mode: warmupMode,
-        cta_templates: ctaTemplates,
-        people_add_range: addRange,
-        add_people_by_keywords: addByKeywords,
-        add_people_keywords: addKeywords,
-        session_times: sessionTimes,
-        cta_templates: ctaTemplates,
-      },
-    })
-  }
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -263,7 +240,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             add_people_by_keywords: addByKeywords,
             add_people_keywords: addKeywords,
             session_times: sessionTimes,
-            cta_templates: ctaTemplates,
           },
         })
         setSaveState('saved')
@@ -540,31 +516,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         )}
       </Section>
 
-      <Section title="Hard daily cap" subtitle={`Never more than ${dailyHardLimit} comments/day`}>
-        <Slider min={1} max={15} value={dailyHardLimit} onChange={(v) => setDailyHardLimit(v)} />
-      </Section>
-
-      <Section title="Comment tone" subtitle="Persona & tone for AI-generated comments">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {[
-            ['intellectual', 'Интеллектуальный'],
-            ['friendly', 'Дружелюбный'],
-            ['provocative', 'Провокационный (для хайпа)'],
-            ['concise', 'Краткий'],
-            ['expert', 'Экспертный'],
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              className="btn btn-sm"
-              onClick={() => setTone(value)}
-              style={tone === value ? { borderColor: '#0A66C2', color: '#0A66C2', fontWeight: 600 } : {}}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </Section>
-
       {/* Likes per day */}
       <Section title="Likes per day" subtitle="Fixed at 5 (maximum safe limit)">
         <div className="card text-center py-3">
@@ -647,9 +598,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
           <span className="text-sm">Enable warm-up</span>
           <Toggle value={warmupMode} onChange={setWarmupMode} />
         </div>
-      </Section>
-      <Section title="Custom CTA templates" subtitle="Add optional phrase; appended to each 10th generated comment">
-        <TagInput tags={ctaTemplates} onChange={setCtaTemplates} placeholder='e.g. "We are building a tool for this..."' />
       </Section>
 
       {(saveState === 'saving' || showSaved || profileLoading) && (

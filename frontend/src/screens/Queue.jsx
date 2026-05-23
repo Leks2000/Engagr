@@ -100,13 +100,6 @@ export default function Queue({ userId, language = 'en' }) {
     reddit: queue.filter((i) => i.platform === 'reddit').length,
   }
 
-  const filteredQueue = queue.filter((item) => platformFilter === 'all' ? true : item.platform === platformFilter)
-  const counts = {
-    all: queue.length,
-    linkedin: queue.filter((i) => i.platform === 'linkedin').length,
-    reddit: queue.filter((i) => i.platform === 'reddit').length,
-  }
-
   const loadQueue = useCallback(async () => {
     if (!loading) setRefreshing(true)
     try {
