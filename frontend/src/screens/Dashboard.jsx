@@ -1,7 +1,78 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../App'
 
-export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate }) {
+const DASH_I18N = {
+  en: {
+    title: 'Dashboard', subtitle: "Today · Engagement performance",
+    runSession: 'Run Session', running: 'Running...', active: 'Active', paused: 'Paused',
+    comments: 'Comments', likes: 'Likes', added: 'People Added', upvotes: 'Upvotes',
+    today: 'Today', nextSessions: 'Next Sessions', totalToday: 'Total Today',
+    warmupMode: 'Warm-up Mode', warmupOn: 'ON', warmupOff: 'OFF',
+    warmupHint: 'Gradually increases daily activity (+1 every 3 days)',
+    warmupDay: 'Day', warmupTarget: 'Target',
+    liveLog: 'Live Session Log', noEvents: 'No events yet. Run a session to see activity.',
+    approveAll: 'Approve All', skipAll: 'Skip All', simulate: 'Simulate',
+    analytics: 'Analytics', weekly: 'Week', monthly: 'Month',
+    smartSchedule: 'Smart Schedule', applySchedule: 'Apply',
+    bestTime: 'Optimal times', calculating: 'Calculating...',
+    totalActions: 'Total Actions', avgPerDay: 'Avg/Day', bestDay: 'Best Day',
+    replies: 'Replies', viewReplies: 'View', noReplies: 'No pending replies',
+    trendingNews: 'Trending Now',
+  },
+  ru: {
+    title: 'Главная', subtitle: "Сегодня · Эффективность",
+    runSession: 'Запустить', running: 'Запуск...', active: 'Активно', paused: 'Пауза',
+    comments: 'Комментарии', likes: 'Лайки', added: 'Добавлено', upvotes: 'Апвоуты',
+    today: 'Сегодня', nextSessions: 'Следующие сессии', totalToday: 'Всего сегодня',
+    warmupMode: 'Режим прогрева', warmupOn: 'ВКЛ', warmupOff: 'ВЫКЛ',
+    warmupHint: 'Постепенно увеличивает активность (+1 каждые 3 дня)',
+    warmupDay: 'День', warmupTarget: 'Цель',
+    liveLog: 'Живой лог сессии', noEvents: 'Событий пока нет. Запустите сессию.',
+    approveAll: 'Одобрить всё', skipAll: 'Пропустить всё', simulate: 'Симуляция',
+    analytics: 'Аналитика', weekly: 'Неделя', monthly: 'Месяц',
+    smartSchedule: 'Умное расписание', applySchedule: 'Применить',
+    bestTime: 'Оптимальное время', calculating: 'Расчёт...',
+    totalActions: 'Всего действий', avgPerDay: 'Сред/день', bestDay: 'Лучший день',
+    replies: 'Ответы', viewReplies: 'Смотреть', noReplies: 'Нет ожидающих ответов',
+    trendingNews: 'Тренды сейчас',
+  },
+  es: {
+    title: 'Panel', subtitle: "Hoy · Rendimiento",
+    runSession: 'Ejecutar', running: 'Ejecutando...', active: 'Activo', paused: 'Pausado',
+    comments: 'Comentarios', likes: 'Gustas', added: 'Añadidos', upvotes: 'Votos',
+    today: 'Hoy', nextSessions: 'Próximas sesiones', totalToday: 'Total hoy',
+    warmupMode: 'Modo calentamiento', warmupOn: 'ON', warmupOff: 'OFF',
+    warmupHint: 'Aumenta gradualmente la actividad diaria (+1 cada 3 días)',
+    warmupDay: 'Día', warmupTarget: 'Meta',
+    liveLog: 'Log en vivo', noEvents: 'Sin eventos. Ejecuta una sesión.',
+    approveAll: 'Aprobar todo', skipAll: 'Saltar todo', simulate: 'Simular',
+    analytics: 'Analítica', weekly: 'Semana', monthly: 'Mes',
+    smartSchedule: 'Horario inteligente', applySchedule: 'Aplicar',
+    bestTime: 'Horas óptimas', calculating: 'Calculando...',
+    totalActions: 'Total acciones', avgPerDay: 'Prom/día', bestDay: 'Mejor día',
+    replies: 'Respuestas', viewReplies: 'Ver', noReplies: 'Sin respuestas pendientes',
+    trendingNews: 'Tendencias ahora',
+  },
+  de: {
+    title: 'Übersicht', subtitle: "Heute · Leistung",
+    runSession: 'Starten', running: 'Läuft...', active: 'Aktiv', paused: 'Pausiert',
+    comments: 'Kommentare', likes: 'Gefällt mir', added: 'Hinzugefügt', upvotes: 'Upvotes',
+    today: 'Heute', nextSessions: 'Nächste Sitzungen', totalToday: 'Gesamt heute',
+    warmupMode: 'Aufwärm-Modus', warmupOn: 'AN', warmupOff: 'AUS',
+    warmupHint: 'Erhöht die tägliche Aktivität schrittweise (+1 alle 3 Tage)',
+    warmupDay: 'Tag', warmupTarget: 'Ziel',
+    liveLog: 'Live-Sitzungsprotokoll', noEvents: 'Noch keine Ereignisse. Starten Sie eine Sitzung.',
+    approveAll: 'Alle genehmigen', skipAll: 'Alle überspringen', simulate: 'Simulieren',
+    analytics: 'Analytik', weekly: 'Woche', monthly: 'Monat',
+    smartSchedule: 'Intelligenter Zeitplan', applySchedule: 'Anwenden',
+    bestTime: 'Optimale Zeiten', calculating: 'Berechnung...',
+    totalActions: 'Aktionen gesamt', avgPerDay: 'Durchschn/Tag', bestDay: 'Bester Tag',
+    replies: 'Antworten', viewReplies: 'Ansehen', noReplies: 'Keine ausstehenden Antworten',
+    trendingNews: 'Trends jetzt',
+  },
+}
+
+export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate, language = 'en' }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
@@ -32,7 +103,12 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
 
   const isActive = settings?.session_active !== false
   const toggleSession = async () => {
-    try { await api.post(`/api/session/${uid}/${isActive ? 'pause' : 'resume'}`); onSettingsUpdate({ session_active: !isActive }) } catch (err) { console.error('Failed to toggle session:', err) }
+    try {
+      await api.post(`/api/session/${uid}/${isActive ? 'pause' : 'resume'}`)
+      onSettingsUpdate({ session_active: !isActive })
+    } catch (err) {
+      console.error('Failed to toggle session:', err)
+    }
   }
 
   const runSession = async () => {
@@ -40,26 +116,72 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
     try {
       const res = await api.post(`/api/session/run/${uid}`)
       const count = res?.queued || 0
-      const msg = `✅ Added ${count} posts to queue`
+      const msg = count > 0 ? `Added ${count} posts to queue` : 'No posts found. Check keywords and connection.'
       setToast(msg)
       setTimeout(() => setToast(''), 4000)
-      // Navigate to Queue tab after short delay
       if (count > 0 && onNavigate) {
         setTimeout(() => onNavigate('queue'), 1500)
       }
     } catch (err) {
-      setToast('❌ Failed to run session')
+      setToast('Failed to run session')
       setTimeout(() => setToast(''), 3000)
     }
     setRunning(false)
   }
 
-  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading stats...</div></div>
+  // Smart Schedule
+  const loadSmartSchedule = async () => {
+    setSmartLoading(true)
+    try {
+      const res = await api.get(`/api/smart-schedule/${uid}/linkedin`)
+      setSmartTimes(res?.times || null)
+    } catch {}
+    setSmartLoading(false)
+  }
+
+  const applySmartSchedule = async () => {
+    try {
+      await api.post(`/api/smart-schedule/${uid}/linkedin/apply`)
+      setToast('Smart Schedule applied!')
+      setTimeout(() => setToast(''), 3000)
+    } catch {}
+  }
+
+  // Warm-up mode
+  const warmupMode = settings?.linkedin?.warmup_mode || false
+  const warmupDay = settings?.linkedin?.warmup_day || 1
+  const warmupTarget = settings?.linkedin?.comments_per_day || 5
+  const toggleWarmup = async () => {
+    try {
+      await onSettingsUpdate({
+        linkedin: {
+          ...settings?.linkedin,
+          warmup_mode: !warmupMode,
+          warmup_day: warmupMode ? 1 : (settings?.linkedin?.warmup_day || 1),
+        }
+      })
+    } catch {}
+  }
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading stats...</div>
+    </div>
+  )
+
+  const liConnected = settings?.linkedin?.connected
+  const rdConnected = settings?.reddit?.connected
+  const activeAnalytics = analyticsTab === 'weekly' ? weeklyData : monthlyData
+  const chartData = analyticsTab === 'weekly' ? weeklyData?.weekly : monthlyData?.monthly
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-xl font-bold tracking-tight">Dashboard</h1><p className="text-xs" style={{ color: 'var(--color-muted)' }}>Today · Engagement performance</p></div>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">{t.title}</h1>
+          <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.subtitle}</p>
+        </div>
         <div className="flex gap-2">
           <button
             className="btn btn-sm btn-run-session"
@@ -67,17 +189,154 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
             disabled={running}
           >
             {running ? (
-              <><span className="spinner-sm" /> Running...</>
-            ) : (
-              '▶ Run Session'
-            )}
+              <><span className="spinner-sm" /> {t.running}</>
+            ) : t.runSession}
           </button>
-          <button className="btn btn-sm" onClick={toggleSession}><span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>{isActive ? 'Active' : 'Paused'}</button>
+          <button className="btn btn-sm" onClick={toggleSession}>
+            <span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>
+            {isActive ? t.active : t.paused}
+          </button>
         </div>
       </div>
 
+      {/* Toast */}
       {toast && (
-        <div className="card mb-4 text-sm toast-msg" style={{ background: toast.includes('❌') ? '#ffeaea' : '#e8f5e9', color: toast.includes('❌') ? '#c62828' : '#1b5e20' }}>{toast}</div>
+        <div className="card mb-4 text-sm toast-msg" style={{
+          background: toast.includes('Failed') ? '#ffeaea' : toast.includes('No posts') ? '#fff8e1' : '#e8f5e9',
+          color: toast.includes('Failed') ? '#c62828' : toast.includes('No posts') ? '#e65100' : '#1b5e20'
+        }}>{toast}</div>
+      )}
+
+      {/* Analytics Section */}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/>
+            </svg>
+            <p className="text-sm font-semibold">{t.analytics}</p>
+          </div>
+          <div className="flex gap-1">
+            <button
+              className="text-xs px-2.5 py-1 rounded-lg font-medium transition-all"
+              style={analyticsTab === 'weekly' ? { background: '#0A66C2', color: '#fff' } : { background: '#f1f5f9', color: '#64748b' }}
+              onClick={() => setAnalyticsTab('weekly')}
+            >{t.weekly}</button>
+            <button
+              className="text-xs px-2.5 py-1 rounded-lg font-medium transition-all"
+              style={analyticsTab === 'monthly' ? { background: '#0A66C2', color: '#fff' } : { background: '#f1f5f9', color: '#64748b' }}
+              onClick={() => setAnalyticsTab('monthly')}
+            >{t.monthly}</button>
+          </div>
+        </div>
+
+        {/* Chart */}
+        {chartData && chartData.length > 0 ? (
+          <div className="mb-3">
+            <div className="flex items-end gap-1" style={{ height: 80 }}>
+              {(analyticsTab === 'weekly' ? chartData : chartData.filter((_, i) => i % 3 === 0 || i === chartData.length - 1)).map((d, i) => {
+                const maxVal = Math.max(...chartData.map(x => x.total), 1)
+                const barH = Math.max((d.total / maxVal) * 64, 4)
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div
+                      className="w-full rounded-sm transition-all"
+                      style={{ height: barH, background: d.total > 0 ? '#0A66C2' : '#e2e8f0', minWidth: 4, maxWidth: 24, opacity: d.total > 0 ? 0.8 : 0.4 }}
+                    />
+                    <span className="text-[9px]" style={{ color: '#94a3b8' }}>
+                      {analyticsTab === 'weekly' ? d.day_name : ''}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Summary stats */}
+            {monthlyData && analyticsTab === 'monthly' && (
+              <div className="grid grid-cols-3 gap-2 mt-3 pt-3" style={{ borderTop: '1px solid #e2e8f0' }}>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.totalActions}</p>
+                  <p className="text-lg font-bold">{monthlyData.total_actions}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.avgPerDay}</p>
+                  <p className="text-lg font-bold">{monthlyData.avg_per_day}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.bestDay}</p>
+                  <p className="text-lg font-bold">{monthlyData.best_day?.total || 0}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-4">
+            <p className="text-xs" style={{ color: 'var(--color-muted)' }}>No data yet. Activity will appear after sessions.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Smart Schedule */}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+            </svg>
+            <p className="text-sm font-semibold">{t.smartSchedule}</p>
+          </div>
+          <button
+            className="text-xs px-2.5 py-1 rounded-lg font-medium"
+            style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}
+            onClick={loadSmartSchedule}
+            disabled={smartLoading}
+          >
+            {smartLoading ? t.calculating : t.bestTime}
+          </button>
+        </div>
+        <p className="text-[11px] mb-2" style={{ color: 'var(--color-muted)' }}>
+          AI analyzes audience activity to find the best posting windows
+        </p>
+        {smartTimes && (
+          <div className="flex items-center gap-2 mt-2">
+            <div className="flex gap-2 flex-1">
+              {smartTimes.map((time, i) => (
+                <span key={i} className="text-xs px-2.5 py-1.5 rounded-lg font-mono font-semibold" style={{ background: '#eff6ff', color: '#0A66C2', border: '1px solid #bfdbfe' }}>
+                  {time}
+                </span>
+              ))}
+            </div>
+            <button
+              className="text-xs px-3 py-1.5 rounded-lg font-medium"
+              style={{ background: '#0A66C2', color: '#fff' }}
+              onClick={applySmartSchedule}
+            >
+              {t.applySchedule}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Nested Replies */}
+      {replies.length > 0 && (
+        <div className="card mb-4" style={{ border: '1px solid #fde68a', background: '#fffbeb' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <p className="text-sm font-semibold" style={{ color: '#92400e' }}>{t.replies} ({replies.length})</p>
+            </div>
+          </div>
+          {replies.slice(0, 2).map((r, i) => (
+            <div key={i} className="text-xs p-2 rounded-lg mb-1" style={{ background: '#fef3c7' }}>
+              <span className="font-semibold">{r.author_name}</span> replied: "{(r.latest_reply?.text || '').slice(0, 60)}..."
+            </div>
+          ))}
+          <p className="text-[11px] mt-1" style={{ color: '#92400e' }}>
+            People are engaging with your AI comments. Continue the conversation!
+          </p>
+        </div>
       )}
 
       <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
@@ -85,29 +344,34 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
           Warm-up: {settings?.linkedin?.warmup_mode ? 'ON' : 'OFF'} · Daily target: {settings?.linkedin?.comments_per_day || 5}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <StatCard label="Comments" value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
-          <StatCard label="Likes" value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
-          <StatCard label="People Added" value={stats?.linkedin_adds || 0} max={settings?.linkedin?.people_add_range?.[1] || 5} icon={<UsersIcon />} tone="linkedin" />
+          <StatCard label={t.comments} value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
+          <StatCard label={t.likes} value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
+          <StatCard label={t.added} value={stats?.linkedin_adds || 0} max={settings?.linkedin?.people_add_range?.[1] || 5} icon={<UsersIcon />} tone="linkedin" />
         </div>
       </PlatformSection>
 
-      <PlatformSection title="Reddit" connected={settings?.reddit?.connected} reddit className="mb-6">
+      {/* Reddit Section */}
+      <PlatformSection title="Reddit" connected={rdConnected} reddit className="mb-4">
         <div className="grid grid-cols-2 gap-3">
-          <StatCard label="Comments" value={stats?.reddit_comments || 0} max={settings?.reddit?.comments_per_day || 15} icon={<MessageIcon />} tone="reddit" />
-          <StatCard label="Upvotes" value={stats?.reddit_upvotes || 0} max={settings?.reddit?.upvotes_per_day || 5} icon={<ArrowUpIcon />} tone="reddit" />
+          <StatCard label={t.comments} value={stats?.reddit_comments || 0} max={settings?.reddit?.comments_per_day || 15} icon={<MessageIcon />} tone="reddit" />
+          <StatCard label={t.upvotes} value={stats?.reddit_upvotes || 0} max={settings?.reddit?.upvotes_per_day || 5} icon={<ArrowUpIcon />} tone="reddit" />
         </div>
       </PlatformSection>
 
-      <div className="card stats-footer card-mount" style={{ animationDelay: "260ms" }}>
+      {/* Summary Card */}
+      <div className="card stats-footer card-mount mb-4" style={{ animationDelay: "260ms" }}>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-xs" style={{ color: "var(--color-muted)" }}>Next Sessions</p>
+            <p className="text-xs" style={{ color: "var(--color-muted)" }}>{t.nextSessions}</p>
             <p className="text-sm font-semibold">LinkedIn: {settings?.linkedin?.session_times?.[0] || "--:--"}</p>
             <p className="text-sm font-semibold">Reddit: {settings?.reddit?.session_times?.[0] || "--:--"}</p>
           </div>
           <div>
-            <p className="text-xs" style={{ color: "var(--color-muted)" }}>Detailed stats</p>
-            <p className="text-sm">Total: {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)+(stats?.linkedin_adds||0)+(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}</p>
+            <p className="text-xs" style={{ color: "var(--color-muted)" }}>{t.totalToday}</p>
+            <p className="text-2xl font-bold" style={{ color: '#0A66C2' }}>
+              {(stats?.linkedin_comments||0)+(stats?.linkedin_likes||0)+(stats?.linkedin_adds||0)+(stats?.reddit_comments||0)+(stats?.reddit_upvotes||0)}
+            </p>
+            <p className="text-xs" style={{ color: 'var(--color-muted)' }}>actions</p>
           </div>
         </div>
       </div>
@@ -121,8 +385,31 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   )
 }
 
+function LogLine({ text }) {
+  let color = '#94a3b8'
+  if (text.includes('success') || text.toLowerCase().includes('posted') || text.toLowerCase().includes('complete')) color = '#4ade80'
+  else if (text.toLowerCase().includes('error') || text.toLowerCase().includes('failed')) color = '#f87171'
+  else if (text.toLowerCase().includes('waiting') || text.toLowerCase().includes('delay')) color = '#fbbf24'
+  else if (text.toLowerCase().includes('linkedin')) color = '#60a5fa'
+  else if (text.toLowerCase().includes('reddit')) color = '#fb923c'
+  else if (text.toLowerCase().includes('generat') || text.toLowerCase().includes('comment')) color = '#a78bfa'
+
+  return <p style={{ color, marginBottom: 2, lineHeight: 1.6 }}>{text}</p>
+}
+
 function PlatformSection({ title, connected, children, reddit, className = '' }) {
-  return <div className={className}><div className="flex items-center gap-2 mb-3"><span className={`badge ${reddit ? 'badge-reddit' : 'badge-linkedin'}`}>{title}</span>{connected && <span className="text-xs" style={{ color: 'var(--color-success)' }}>Connected</span>}</div>{children}</div>
+  return (
+    <div className={className}>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`badge ${reddit ? 'badge-reddit' : 'badge-linkedin'}`}>{title}</span>
+        {connected
+          ? <span className="text-xs font-medium" style={{ color: '#10b981' }}>Connected</span>
+          : <span className="text-xs font-medium" style={{ color: '#94a3b8' }}>Not connected</span>
+        }
+      </div>
+      {children}
+    </div>
+  )
 }
 
 function StatCard({ label, value, max, icon, tone }) {
@@ -132,11 +419,22 @@ function StatCard({ label, value, max, icon, tone }) {
   return (
     <div className="card metric-card card-mount">
       <div className="flex items-start justify-between mb-3">
-        <div className="metric-label-wrap"><p className="metric-label">{label}</p><p className="metric-meta">Today</p></div>
+        <div className="metric-label-wrap">
+          <p className="metric-label">{label}</p>
+          <p className="metric-meta">Today</p>
+        </div>
         <div className="metric-icon" style={{ color }}>{icon}</div>
       </div>
-      <div className="flex items-end justify-between mb-2"><p className="metric-value">{value}</p><p className="metric-max">of {max}</p></div>
-      <div className="metric-progress-bg"><div className="metric-progress-fill progress-animate" style={{ "--target": `${pct}%`, background: done ? 'var(--color-success)' : color }} /></div>
+      <div className="flex items-end justify-between mb-2">
+        <p className="metric-value">{value}</p>
+        <p className="metric-max">of {max}</p>
+      </div>
+      <div className="metric-progress-bg">
+        <div
+          className="metric-progress-fill progress-animate"
+          style={{ "--target": `${pct}%`, background: done ? 'var(--color-success)' : color }}
+        />
+      </div>
     </div>
   )
 }

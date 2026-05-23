@@ -18,6 +18,22 @@ const userId = tg?.initDataUnsafe?.user?.id?.toString() || userIdFromQuery || us
 window.localStorage.setItem('engagr_user_id', userId)
 const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
+// Auto-detect language from Telegram user settings
+const SUPPORTED_LANGS = ['en', 'ru', 'es', 'de']
+function detectTelegramLanguage() {
+  // Primary: Telegram language_code from initDataUnsafe
+  const tgLang = tg?.initDataUnsafe?.user?.language_code || ''
+  if (tgLang) {
+    const base = tgLang.split('-')[0].toLowerCase()
+    if (SUPPORTED_LANGS.includes(base)) return base
+  }
+  // Secondary: navigator.language
+  const navLang = (navigator.language || navigator.userLanguage || 'en').split('-')[0].toLowerCase()
+  return SUPPORTED_LANGS.includes(navLang) ? navLang : 'en'
+}
+
+export const detectedLanguage = detectTelegramLanguage()
+
 export const api = {
   async get(path) {
     const res = await fetch(`${API_BASE}${path}`)
@@ -40,13 +56,23 @@ export const api = {
   },
 }
 
-
-
 export const translations = {
-  en: { dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue' },
-  ru: { dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь' },
-  es: { dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola' },
-  de: { dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange' },
+  en: {
+    dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue',
+    loading: 'Loading...', appName: 'Engagr',
+  },
+  ru: {
+    dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь',
+    loading: 'Загрузка...', appName: 'Engagr',
+  },
+  es: {
+    dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola',
+    loading: 'Cargando...', appName: 'Engagr',
+  },
+  de: {
+    dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange',
+    loading: 'Laden...', appName: 'Engagr',
+  },
 }
 
 const NAV_ITEMS = [
@@ -59,14 +85,21 @@ const NAV_ITEMS = [
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
-  const language = settings?.language || 'en'
+  // Language: from settings or auto-detected from Telegram
+  const language = settings?.language || detectedLanguage
   const t = useMemo(() => translations[language] || translations.en, [language])
   const [webAppReady, setWebAppReady] = useState(!window.Telegram?.WebApp)
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp
     if (webApp) {
-      try { webApp.ready?.(); webApp.expand?.() } catch {}
+      try {
+        webApp.ready?.()
+        webApp.expand?.()
+        // Set header color to match our theme
+        webApp.setHeaderColor?.('#ffffff')
+        webApp.setBackgroundColor?.('#f8fafc')
+      } catch {}
       setWebAppReady(true)
     } else {
       const timer = setTimeout(() => setWebAppReady(true), 500)
@@ -77,6 +110,11 @@ function App() {
   const loadSettings = useCallback(async () => {
     try {
       const data = await api.get(`/api/settings/${userId}`)
+      // Auto-set language if not set yet
+      if (!data?.language && detectedLanguage) {
+        await api.put(`/api/settings/${userId}`, { language: detectedLanguage })
+        data.language = detectedLanguage
+      }
       setSettings(data)
       setScreen(data?.onboarding_completed ? 'dashboard' : 'onboarding')
     } catch (err) {
@@ -106,9 +144,24 @@ function App() {
     }
   }, [])
 
+  if (!webAppReady || screen === 'loading') return (
+    <div className="flex items-center justify-center min-h-screen" style={{ background: '#f8fafc' }}>
+      <div className="text-center animate-fade-in">
+        <div className="text-2xl font-bold tracking-tight mb-2">Engagr</div>
+        <div className="text-sm" style={{ color: 'var(--color-muted)' }}>{t.loading}</div>
+        <div className="mt-4 flex justify-center gap-1">
+          {[0,1,2].map(i => (
+            <div key={i} className="w-2 h-2 rounded-full" style={{
+              background: '#0A66C2',
+              animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`
+            }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 
-  if (!webAppReady || screen === 'loading') return <div className="flex items-center justify-center min-h-screen"><div className="text-center animate-fade-in"><div className="text-2xl font-bold tracking-tight mb-2">Engagr</div><div className="text-sm" style={{ color: 'var(--color-muted)' }}>Loading...</div></div></div>
-  if (screen === 'onboarding') return <Onboarding userId={userId} onComplete={loadSettings} />
+  if (screen === 'onboarding') return <Onboarding userId={userId} detectedLanguage={detectedLanguage} onComplete={loadSettings} />
 
   return (
     <div className="flex flex-col min-h-screen app-shell">
@@ -121,7 +174,7 @@ function App() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
-            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
+            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} language={language} /></div>}
             {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
@@ -130,7 +183,16 @@ function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-1" style={{ borderColor: '#e5e7eb' }}>
-        {NAV_ITEMS.map(item => <button key={item.id} className={`nav-item ${screen === item.id ? 'active' : ''}`} onClick={() => setScreen(item.id)}><item.icon /><span>{t[item.labelKey] || item.id}</span></button>)}
+        {NAV_ITEMS.map(item => (
+          <button
+            key={item.id}
+            className={`nav-item ${screen === item.id ? 'active' : ''}`}
+            onClick={() => setScreen(item.id)}
+          >
+            <item.icon />
+            <span>{t[item.labelKey] || item.id}</span>
+          </button>
+        ))}
       </nav>
       <Analytics />
       <SpeedInsights />
@@ -139,10 +201,10 @@ function App() {
 }
 
 const base = { fill: 'none', stroke: 'currentColor', strokeWidth: '1.75', strokeLinecap: 'round', strokeLinejoin: 'round' }
-function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3 13h8V3H3zM13 21h8v-8h-8zM13 3h8v6h-8zM3 21h8v-4H3z"/></svg> }
+function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> }
 function LinkedInIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><path d="M2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg> }
 function RedditIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M8 17c2.667 1 5.333 1 8 0"/><path d="M5 12c0-3 3-5 7-5s7 2 7 5-3 6-7 6-7-3-7-6Z"/><path d="M15 7l1-4 3 1"/><circle cx="19" cy="10" r="1"/><circle cx="5" cy="10" r="1"/></svg> }
-function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg> }
+function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M9 12h6"/><path d="M9 16h6"/></svg> }
 
 export default App
 export { userId }

@@ -63,12 +63,11 @@ Add these topics in your repo settings:
 ### 2) Install
 
 ```bash
-git clone https://github.com/your-username/engagr.git
-cd engagr
+git clone https://github.com/Leks2000/Engagr.git
+cd Engagr
 
 # Backend
 pip install -r requirements.txt
-playwright install chromium
 
 # Frontend
 cd frontend
@@ -142,13 +141,85 @@ engagr/
 
 ---
 
-## Deployment (Railway + Static Frontend)
+## Semi-Auto Workflow (Queue Card Actions)
 
-1. Push backend repo to GitHub.
-2. Deploy on Railway from GitHub repo.
-3. Add environment variables in Railway.
-4. Deploy frontend (`frontend/dist`) to Vercel/Netlify/Railway static hosting.
-5. Set Mini App URL in BotFather menu button.
+Each post in the queue shows:
+
+| Button | Action |
+|--------|--------|
+| **💬 Copy & Open** | Copies selected AI comment to clipboard → opens LinkedIn post deep link |
+| **👍 Like** | Opens post for quick reaction |
+| **🤝 Invite** | Generates 300-char invite → copies to clipboard → opens author profile |
+| **✏️ Edit** | Modify the AI comment before copying |
+| **🔄 Regen** | Generate a new comment variant |
+| **✕ Skip** | Remove post from queue |
+
+---
+
+## Daily Limits (Hard Caps)
+
+| Platform | Action     | Max/Day |
+|----------|-----------|---------|
+| LinkedIn | Comments   | 15      |
+| LinkedIn | Likes      | 5       |
+| LinkedIn | Connections| 5       |
+| Reddit   | Comments   | 15      |
+| Reddit   | Upvotes    | 5       |
+
+---
+
+## Anti-spam Delays
+
+| Action             | Delay Range     |
+|--------------------|-----------------|
+| Between comments   | 5–30 minutes    |
+| Between likes      | 2–7 minutes     |
+| Between connections| 3–10 minutes    |
+
+---
+
+## Bot Commands
+
+| Command       | Description                |
+|---------------|----------------------------|
+| `/start`      | Welcome + setup            |
+| `/dashboard`  | Today's stats              |
+| `/queue`      | Pending comments           |
+| `/settings`   | Open Mini App settings     |
+| `/digest`     | Get daily top-3 posts      |
+| `/connections`| View networking CRM        |
+| `/linkedin`   | LinkedIn setup guide       |
+| `/reddit`     | Reddit setup guide         |
+| `/pause`      | Pause all sessions         |
+| `/resume`     | Resume sessions            |
+
+---
+
+## Key Killer Features
+
+### 1. Humanness Scorer
+Posts are analyzed for AI-generated patterns (cliches, emoji spam, engagement bait). Only genuinely human posts appear in your queue.
+
+### 2. Interaction Memory (CRM)
+The app remembers who you've engaged with before. When the same author posts again, you get a notification: "You've interacted with them 3 times before. Keep building this relationship!"
+
+### 3. News Jacking
+First comments under viral posts get 90% of views. The system monitors RSS feeds and alerts you to trending topics matching your keywords.
+
+### 4. Nested Conversation Booster
+When someone replies to your AI comment, the app generates a follow-up reply to keep the conversation going and convert leads.
+
+### 5. Daily Digest
+Every morning, you receive 3 top posts with ready-made comments in Telegram. One tap to copy + open.
+
+---
+
+## Railway Deployment
+
+1. Push to GitHub
+2. Deploy on [railway.app](https://railway.app) → Deploy from GitHub
+3. Add environment variables
+4. Railway auto-deploys using `railway.toml`
 
 ---
 

@@ -192,6 +192,37 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("▶️ Sessions resumed!")
 
 
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Trigger daily digest manually."""
+    user_id = str(update.effective_user.id)
+    import daily_digest as dd
+    dd.set_send_callback(send_queue_item_to_user)
+    await dd.send_daily_digest(user_id)
+
+
+async def cmd_connections(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show top connections (CRM view)."""
+    user_id = str(update.effective_user.id)
+    import interaction_memory
+    top = interaction_memory.get_top_connections(user_id, limit=10)
+    
+    if not top:
+        await update.message.reply_text(
+            "📇 *Networking CRM*\n\n"
+            "No interactions recorded yet. Start engaging with posts!",
+            parse_mode="Markdown",
+        )
+        return
+    
+    lines = ["📇 *Your Top Connections*\n"]
+    for i, c in enumerate(top, 1):
+        lines.append(
+            f"{i}. *{c.get('author_name', '?')}* — {c.get('interaction_count', 0)} interactions"
+        )
+    
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 # ── Queue Card (Telegram Approval Flow) ──────────────
 
 async def _send_queue_card(chat_id, item: dict, context: ContextTypes.DEFAULT_TYPE):
@@ -379,9 +410,41 @@ async def send_queue_item_to_user(user_id: str, item: dict):
             await app.bot.send_message(chat_id=int(user_id), text=item["message"])
             return
         
-        platform_badge = "📍 LINKEDIN" if item.get("platform") == "linkedin" else "📍 REDDIT"
+        if item.get("type") == "digest_header":
+            await app.bot.send_message(
+                chat_id=int(user_id),
+                text=item["message"],
+                parse_mode="Markdown",
+            )
+            return
+        
+        if item.get("type") == "digest_item":
+            # Daily digest item with copy-to-clipboard action
+            idx = item.get("index", 0)
+            text = (
+                f"*{idx}. {item.get('title', '')}*\n"
+                f"_{item.get('source', '')}_ | [Open Link]({item.get('url', '')})\n\n"
+                f"💬 Suggested comment:\n`{item.get('comment', '')}`\n"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📋 Copy Comment", callback_data=f"digest_copy_{idx}"),
+                    InlineKeyboardButton("🔗 Open Post", url=item.get("url", "https://linkedin.com")),
+                ],
+                [InlineKeyboardButton("🔄 Regenerate", callback_data=f"digest_regen_{idx}")],
+            ])
+            await app.bot.send_message(
+                chat_id=int(user_id),
+                text=text,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+            return
+        
+        platform_badge = "LINKEDIN" if item.get("platform") == "linkedin" else "REDDIT"
         text = (
-            f"{platform_badge}\n"
+            f"📍 {platform_badge}\n"
             f"📝 {item.get('post_excerpt', '')[:200]}\n\n"
             f"💬 {item.get('comment', '')}\n"
         )
@@ -424,6 +487,8 @@ def create_bot() -> Application:
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("digest", cmd_digest))
+    app.add_handler(CommandHandler("connections", cmd_connections))
     
     # Callback queries (button presses)
     app.add_handler(CallbackQueryHandler(handle_callback))

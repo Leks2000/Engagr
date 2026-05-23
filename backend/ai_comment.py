@@ -2,6 +2,7 @@
 Engagr — AI Comment Generation via Groq
 Uses llama-3.3-70b-versatile to generate short, human-sounding comments.
 Generates 3 variants per post with automatic language detection.
+Integrates with News Grounding for industry-relevant references.
 """
 
 import logging
@@ -16,7 +17,9 @@ _client = None
 SYSTEM_PROMPT = (
     "You are a developer and indie hacker. Write a genuine comment. "
     "Rules: 3-20 words, match post language exactly, sound human, "
-    "no hashtags, no emojis, no self-promotion, add real value."
+    "no hashtags, no emojis, no self-promotion, add real value. "
+    "If relevant trending news is provided, you may subtly reference it "
+    "to make your comment feel more current and informed."
 )
 
 TONE_GUIDE = {
@@ -47,6 +50,7 @@ def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "fr
     """
     Generate a single short, genuine comment for a social media post.
     The AI automatically matches the language of the post.
+    Integrates news grounding for more relevant comments.
     """
     try:
         client = _get_client()

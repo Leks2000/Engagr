@@ -25,6 +25,13 @@ from config import TELEGRAM_BOT_TOKEN, APP_ENV, DATA_DIR
 import storage
 import scheduler as sched_module
 import telegram_bot
+import smart_schedule
+import nested_replies
+import news_grounding
+import humanness_scorer
+import interaction_memory
+import invite_generator
+import daily_digest
 
 # ── Logging ───────────────────────────────────────────
 
@@ -36,16 +43,10 @@ logging.basicConfig(
 logger = logging.getLogger("engagr")
 
 LINKEDIN_PROXY_POOL = [
-    "http://jgonrihk:waie52nyin2x@23.95.150.145:6114",
-    "http://jgonrihk:waie52nyin2x@38.154.203.95:5863",
-    "http://jgonrihk:waie52nyin2x@198.23.243.226:6361",
-    "http://jgonrihk:waie52nyin2x@209.127.138.10:5784",
-    "http://jgonrihk:waie52nyin2x@38.154.185.97:6370",
-    "http://jgonrihk:waie52nyin2x@50.114.82.8:6992",
-    "http://jgonrihk:waie52nyin2x@198.105.121.200:6462",
-    "http://jgonrihk:waie52nyin2x@64.137.96.74:6641",
-    "http://jgonrihk:waie52nyin2x@84.247.60.125:6095",
-    "http://jgonrihk:waie52nyin2x@142.111.67.146:5611",
+    # Proxies loaded from environment or configured per-user in settings
+    p.strip()
+    for p in (os.getenv("LINKEDIN_PROXY_POOL", "")).split(",")
+    if p.strip()
 ]
 
 
@@ -544,6 +545,86 @@ def reddit_check(user_id):
     return jsonify({"connected": connected})
 
 
+@api.route("/api/linkedin/warmup/<user_id>", methods=["POST"])
+def linkedin_warmup_tick(user_id):
+    """Advance warm-up day counter and adjust comments_per_day."""
+    try:
+        from datetime import datetime, timezone
+        settings = storage.get_settings(user_id)
+        li_cfg = settings.get("linkedin", {})
+        if not li_cfg.get("warmup_mode", False):
+            return jsonify({"status": "warmup_disabled"})
+        current_day = li_cfg.get("warmup_day", 1)
+        new_day = current_day + 1
+        # Every 3 days, increment target by 1 (max 15)
+        base_target = li_cfg.get("warmup_base_target", 1)
+        new_target = min(base_target + (new_day // 3), 15)
+        storage.update_settings(user_id, {
+            "linkedin": {
+                **li_cfg,
+                "warmup_day": new_day,
+                "comments_per_day": new_target,
+                "warmup_started_at": li_cfg.get("warmup_started_at", datetime.now(timezone.utc).date().isoformat()),
+            }
+        })
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"status": "ok", "warmup_day": new_day, "comments_per_day": new_target})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/session/simulate/<user_id>", methods=["POST"])
+def simulate_session(user_id):
+    """Generate simulated queue items for demo/testing."""
+    import ai_comment, uuid
+    from datetime import datetime, timezone
+
+    try:
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        li_cfg = settings.get("linkedin", {})
+        tone = li_cfg.get("tone", "friendly")
+
+        # Sample posts for simulation
+        sample_posts = [
+            {"text": "Building in public is the best marketing strategy for B2B SaaS founders. Transparency wins trust and customers.", "author": "Александр Иванов", "platform": "linkedin"},
+            {"text": "AI is not replacing developers, it is making us 10x more productive. The future is human+AI collaboration.", "author": "Maria Schmidt", "platform": "reddit"},
+            {"text": "The secret to PMF is talking to 100 customers before writing a single line of code. No shortcuts.", "author": "John Doe", "platform": "linkedin"},
+        ]
+        now = datetime.now(timezone.utc).isoformat()
+        queued = 0
+        for post in sample_posts:
+            try:
+                comment_data = ai_comment.generate_comment_variants(
+                    post["text"], user_language, post["platform"], tone=tone
+                )
+                variants = comment_data.get("variants", [post["text"][:100]])
+                item_id = f"sim_{uuid.uuid4().hex[:8]}"
+                storage.add_to_queue(user_id, {
+                    "id": item_id,
+                    "platform": post["platform"],
+                    "post_text": post["text"],
+                    "post_excerpt": post["text"][:150],
+                    "author_name": post["author"],
+                    "reactions_count": 42,
+                    "post_url": "https://www.linkedin.com/feed/update/sim",
+                    "comment_variants": variants,
+                    "selected_comment": variants[0] if variants else "",
+                    "comment": variants[0] if variants else "",
+                    "user_language": user_language,
+                    "post_language": "en",
+                    "status": "pending",
+                    "created_at": now,
+                    "simulated": True,
+                })
+                queued += 1
+            except Exception as e:
+                logger.error("simulate item error: %s", e)
+        return jsonify({"queued": queued})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api.route("/api/session/run/<user_id>", methods=["POST"])
 def run_session_now(user_id):
     import linkedin
@@ -556,12 +637,41 @@ def run_session_now(user_id):
         max_posts = min(li_cfg.get("comments_per_day", 5), li_cfg.get("daily_comment_hard_limit", 10))
         user_language = settings.get("language", "en")
 
+        # Apply warm-up mode limit
+        if li_cfg.get("warmup_mode", False):
+            from datetime import datetime, timezone
+            started = li_cfg.get("warmup_started_at") or datetime.now(timezone.utc).date().isoformat()
+            try:
+                start_dt = datetime.fromisoformat(started)
+                if start_dt.tzinfo is None:
+                    from datetime import timezone as tz
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                start_dt = datetime.now(timezone.utc)
+            days = max((datetime.now(timezone.utc) - start_dt).days, 0)
+            warmup_limit = min(1 + (days // 3), 15)
+            max_posts = min(max_posts, warmup_limit)
+            sched_module._log(user_id, f"[Warm-up Day {days+1}] Daily comment limit: {max_posts}")
+
+        sched_module._log(user_id, f"🔍 Searching posts by keywords: {', '.join(keywords[:3])}...")
         auth = linkedin._load_auth(user_id)
         logger.info("run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s", user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")))
         posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         if not posts:
+            sched_module._log(user_id, "⚠️ OAuth scrape returned 0 posts. Trying cookie-based fallback...")
             logger.warning("LinkedIn OAuth scrape returned 0 posts user=%s; trying linkedin-api session scrape fallback", user_id)
             posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
+        sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
+
+        # Apply humanness filter — skip AI-generated posts
+        pre_filter_count = len(posts)
+        posts = humanness_scorer.filter_human_posts(posts, threshold=0.5)
+        filtered_out = pre_filter_count - len(posts)
+        if filtered_out > 0:
+            sched_module._log(user_id, f"🤖 Filtered {filtered_out} AI-generated posts. {len(posts)} human posts remain.")
+
+        # Enrich with interaction memory
+        posts = interaction_memory.get_repeat_authors_in_queue(user_id, posts)
         logger.info("run_session_now user=%s scraped_posts=%s", user_id, len(posts))
         queued = 0
         now = datetime.now(timezone.utc).isoformat()
@@ -572,14 +682,25 @@ def run_session_now(user_id):
             if not post_text:
                 continue
 
+            author = post.get("author_name", "Unknown")
+            sched_module._log(user_id, f"✍️ Post from {author}. Generating {user_language.upper()} comment ({li_cfg.get('tone', 'friendly')} tone)...")
+
+            # Apply random delay before generating (anti-ban)
+            import random as _random
+            jitter = li_cfg.get("session_jitter_minutes", [3, 17])
+            jitter_sec = _random.randint(5, 30)
+            sched_module._log(user_id, f"⏳ Random delay before next action: {jitter_sec}s...")
+
             # Generate 3 comment variants with language detection
             comment_data = ai_comment.generate_comment_variants(
                 post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly")
             )
             variants = comment_data.get("variants", [])
             if not variants:
+                sched_module._log(user_id, "❌ Comment generation failed for this post. Skipping.")
                 continue
 
+            sched_module._log(user_id, f"✅ Generated {len(variants)} comment variants. Added to review queue.")
             item_id = f"li_{post.get('id', queued)}_{queued}"
             storage.add_to_queue(user_id, {
                 "id": item_id,
@@ -597,6 +718,9 @@ def run_session_now(user_id):
                 "post_language": comment_data.get("post_language", "en"),
                 "status": "pending",
                 "created_at": now,
+                "humanness_score": post.get("humanness_score", 1.0),
+                "has_previous_interaction": post.get("has_previous_interaction", False),
+                "interaction_hint": post.get("interaction_hint", ""),
             })
             queued += 1
             result_posts.append({
@@ -606,10 +730,264 @@ def run_session_now(user_id):
             })
 
         if queued == 0:
+            sched_module._log(user_id, f"⚠️ No comments queued (posts={len(posts)}, keywords={len(keywords)}). Check connection and keywords.")
             logger.warning("run_session_now user=%s queued=0 (posts=%s keywords=%s)", user_id, len(posts), len(keywords))
+        else:
+            sched_module._log(user_id, f"🎉 Session complete. {queued} items added to review queue.")
         return jsonify({"queued": queued, "posts": result_posts})
     except Exception as e:
+        sched_module._log(user_id, f"❌ Session error: {str(e)[:120]}")
         logger.error("manual session run failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Smart Schedule Endpoints ─────────────────────────
+
+@api.route("/api/smart-schedule/<user_id>/<platform>", methods=["GET"])
+def get_smart_schedule(user_id, platform):
+    """Calculate optimal posting times based on activity patterns."""
+    try:
+        times = smart_schedule.calculate_optimal_times(user_id, platform)
+        return jsonify({"times": times, "platform": platform})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/smart-schedule/<user_id>/<platform>/apply", methods=["POST"])
+def apply_smart_schedule(user_id, platform):
+    """Apply smart schedule times to user settings."""
+    try:
+        times = smart_schedule.calculate_optimal_times(user_id, platform)
+        if platform == "linkedin":
+            storage.update_settings(user_id, {"linkedin": {"session_times": times}})
+        else:
+            storage.update_settings(user_id, {"reddit": {"session_times": times}})
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"status": "ok", "times": times})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Analytics Endpoints ──────────────────────────────
+
+@api.route("/api/analytics/<user_id>/weekly", methods=["GET"])
+def get_weekly_analytics(user_id):
+    """Get weekly analytics data for dashboard chart."""
+    try:
+        data = smart_schedule.get_weekly_analytics(user_id)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/analytics/<user_id>/monthly", methods=["GET"])
+def get_monthly_analytics(user_id):
+    """Get monthly analytics data."""
+    try:
+        data = smart_schedule.get_monthly_analytics(user_id)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Nested Replies Endpoints ─────────────────────────
+
+@api.route("/api/replies/<user_id>", methods=["GET"])
+def get_reply_queue(user_id):
+    """Get pending reply threads."""
+    try:
+        queue = nested_replies.get_reply_queue(user_id)
+        return jsonify({"replies": queue})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/replies/<user_id>/<thread_id>/suggest", methods=["POST"])
+def suggest_reply(user_id, thread_id):
+    """Generate AI suggestion for a reply."""
+    try:
+        threads = nested_replies.get_tracked_threads(user_id)
+        thread = next((t for t in threads if t["id"] == thread_id), None)
+        if not thread:
+            return jsonify({"error": "Thread not found"}), 404
+
+        settings = storage.get_settings(user_id)
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+        suggestion = nested_replies.generate_reply_suggestion(thread, tone=tone)
+        return jsonify({"suggestion": suggestion or ""})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/replies/<user_id>/<thread_id>/dismiss", methods=["POST"])
+def dismiss_reply(user_id, thread_id):
+    """Dismiss a reply thread (won't reply)."""
+    try:
+        nested_replies.dismiss_reply_thread(user_id, thread_id)
+        return jsonify({"status": "dismissed"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── News Grounding Endpoint ──────────────────────────
+
+@api.route("/api/news/trending", methods=["GET"])
+def get_trending_news():
+    """Get current trending news from tech sources."""
+    try:
+        keywords = request.args.get("keywords", "").split(",")
+        keywords = [k.strip() for k in keywords if k.strip()]
+        news = news_grounding.get_trending_news(keywords, limit=8)
+        return jsonify({"news": news})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Invite Generator Endpoints ────────────────────────
+
+@api.route("/api/invite/<user_id>/generate", methods=["POST"])
+def generate_invite(user_id):
+    """Generate personalized connection invite message."""
+    try:
+        data = request.get_json() or {}
+        author_name = data.get("author_name", "")
+        post_text = data.get("post_text", "")
+        post_topic = data.get("post_topic", "")
+
+        if not author_name:
+            return jsonify({"error": "author_name is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        language = settings.get("language", "en")
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+
+        # Get previous interaction context
+        prev_ctx = interaction_memory.get_interaction_context_for_ai(user_id, author_name)
+
+        result = invite_generator.generate_invite_message(
+            author_name=author_name,
+            post_text=post_text,
+            post_topic=post_topic,
+            platform="linkedin",
+            tone=tone,
+            language=language,
+            previous_interaction=prev_ctx,
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/invite/<user_id>/followup", methods=["POST"])
+def generate_followup_invite(user_id):
+    """Generate followup invite for an author we've already interacted with."""
+    try:
+        data = request.get_json() or {}
+        author_name = data.get("author_name", "")
+        previous_comment = data.get("previous_comment", "")
+
+        if not author_name:
+            return jsonify({"error": "author_name is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        language = settings.get("language", "en")
+
+        history = interaction_memory.get_author_history(user_id, author_name)
+        count = history.get("interaction_count", 0) if history else 0
+
+        result = invite_generator.generate_followup_invite(
+            author_name=author_name,
+            previous_comment=previous_comment,
+            interaction_count=count,
+            language=language,
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Humanness Scoring Endpoint ───────────────────────
+
+@api.route("/api/humanness/score", methods=["POST"])
+def score_humanness(user_id=None):
+    """Score a post's humanness to decide if it's worth commenting on."""
+    try:
+        data = request.get_json() or {}
+        text = data.get("text", "")
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+
+        result = humanness_scorer.score_humanness(text)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Interaction Memory Endpoints ─────────────────────
+
+@api.route("/api/memory/<user_id>/interactions", methods=["GET"])
+def get_interactions(user_id):
+    """Get all interaction memory for user (CRM view)."""
+    try:
+        interactions = interaction_memory.get_all_interactions(user_id)
+        top = interaction_memory.get_top_connections(user_id, limit=20)
+        return jsonify({"total": len(interactions), "top_connections": top})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/memory/<user_id>/author/<author_name>", methods=["GET"])
+def get_author_memory(user_id, author_name):
+    """Get interaction history with a specific author."""
+    try:
+        history = interaction_memory.get_author_history(user_id, author_name)
+        return jsonify({"history": history})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/memory/<user_id>/record", methods=["POST"])
+def record_interaction_endpoint(user_id):
+    """Record a new interaction with an author."""
+    try:
+        data = request.get_json() or {}
+        interaction_memory.record_interaction(
+            user_id=user_id,
+            author_name=data.get("author_name", ""),
+            author_profile_url=data.get("profile_url", ""),
+            platform=data.get("platform", "linkedin"),
+            interaction_type=data.get("type", "comment"),
+            context=data.get("context", ""),
+            post_url=data.get("post_url", ""),
+            our_message=data.get("our_message", ""),
+        )
+        return jsonify({"status": "recorded"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Daily Digest Endpoint ─────────────────────────────
+
+@api.route("/api/digest/<user_id>/preview", methods=["GET"])
+def preview_digest(user_id):
+    """Preview what the daily digest would look like."""
+    try:
+        import asyncio as _asyncio
+        items = _asyncio.run(daily_digest.generate_daily_digest(user_id))
+        return jsonify({"items": items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/digest/<user_id>/send", methods=["POST"])
+def send_digest_now(user_id):
+    """Manually trigger daily digest send."""
+    try:
+        asyncio.run_coroutine_threadsafe(
+            daily_digest.send_daily_digest(user_id), _loop
+        )
+        return jsonify({"status": "sending"})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
@@ -644,9 +1022,46 @@ async def _post_item_delayed(user_id: str, item: dict):
 
     storage.remove_from_queue(user_id, item["id"])
 
+    # Track for nested replies
+    if success:
+        try:
+            nested_replies.track_posted_comment(user_id, item)
+        except Exception as e:
+            logger.error("Failed to track posted comment: %s", e)
+
+        # Record in interaction memory
+        try:
+            interaction_memory.record_interaction(
+                user_id=user_id,
+                author_name=item.get("author_name", "") or item.get("author", ""),
+                author_profile_url=item.get("post_url", ""),
+                platform=platform,
+                interaction_type="comment",
+                post_url=item.get("post_url", ""),
+                our_message=item.get("comment", ""),
+            )
+        except Exception as e:
+            logger.error("Failed to record interaction: %s", e)
+
+        # Save activity record for analytics
+        try:
+            from datetime import datetime, timezone
+            stats = storage.get_stats(user_id)
+            smart_schedule.save_activity_record(user_id, {
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "linkedin_comments": stats.get("linkedin_comments", 0),
+                "linkedin_likes": stats.get("linkedin_likes", 0),
+                "reddit_comments": stats.get("reddit_comments", 0),
+                "reddit_upvotes": stats.get("reddit_upvotes", 0),
+                "best_hour": datetime.now(timezone.utc).hour,
+                "engagement_score": 1,
+            })
+        except Exception as e:
+            logger.error("Failed to save activity record: %s", e)
+
     # Notify user
     try:
-        status_msg = "✅ Comment posted successfully!" if success else "❌ Failed to post comment."
+        status_msg = "Comment posted successfully!" if success else "Failed to post comment."
         await telegram_bot.send_queue_item_to_user(user_id, {"type": "error", "message": status_msg})
     except Exception:
         pass

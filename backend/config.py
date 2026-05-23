@@ -93,6 +93,10 @@ DEFAULT_SETTINGS = {
         "add_people_by_keywords": False,
         "add_people_keywords": [],
         "session_times": ["09:00", "14:00", "19:00"],
+        "warmup_mode": False,
+        "warmup_day": 1,
+        "cta_templates": [],
+        "smart_schedule_enabled": False,
     },
     "onboarding_completed": False,
     "reddit": {
@@ -110,6 +114,8 @@ DEFAULT_SETTINGS = {
         "upvotes_per_day": 5,
         "session_times": ["09:00", "14:00", "19:00"],
     },
+    "nested_replies_enabled": True,
+    "news_grounding_enabled": True,
 }
 
 # ── Default Daily Stats ──────────────────────────────
