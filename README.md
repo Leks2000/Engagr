@@ -1,53 +1,66 @@
 # Engagr
 
-**Telegram Mini App + Bot for LinkedIn & Reddit engagement automation.**
+**Engagr is a Telegram Mini App + Telegram Bot that helps founders and growth teams automate LinkedIn and Reddit engagement with AI, safe pacing, and human approval workflows.**
 
-Semi-automated social engagement powered by AI. Copy-to-clipboard workflow ensures zero ban risk while maximizing your LinkedIn & Reddit presence.
-
----
-
-## Architecture: Semi-Automation (Copy-to-Clipboard)
-
-Unlike risky full-automation tools, Engagr uses a **safe semi-automated approach**:
-
-1. **AI generates** personalized comments, invite messages, and replies
-2. **User copies** the text to clipboard with one tap
-3. **App opens** the target post/profile via deep link
-4. **User pastes** and submits natively in LinkedIn/Reddit
-
-**Why this is the best approach:**
-- **Safety (10/10):** Zero ban risk — actions are performed by a real human from their native app
-- **Maintenance (10/10):** No dependency on LinkedIn's UI/DOM — works regardless of interface changes
-- **Cross-platform:** Works on iOS, Android, and desktop via Telegram
+👉 **Use the official bot:** [@Engagr_bot](https://t.me/Engagr_bot)
 
 ---
 
-## Features
+## Repository Description (for GitHub)
 
-- **AI Comment Generation** — Groq (llama-3.3-70b-versatile) generates genuine, human-sounding comments (3 variants per post)
-- **Copy-to-Clipboard Workflow** — One-tap copy + deep link to LinkedIn/Reddit post
-- **Invite Generator** — AI-crafted connection requests (max 300 chars) with copy + profile link
-- **Humanness Scoring** — Filters out AI-generated posts (no point commenting on robots)
-- **Interaction Memory (CRM)** — Remembers previous conversations with authors
-- **News Jacking** — Monitors HackerNews/TechCrunch/ProductHunt for early commenting opportunities
-- **Daily Digest** — Top 3 posts delivered to Telegram with ready-to-use comments
-- **Nested Reply Tracking** — Detects replies to your comments, generates follow-up responses
-- **Smart Schedule** — AI calculates optimal posting times based on engagement patterns
-- **Warm-up Mode** — Gradually increases daily activity to avoid detection
-- **Multi-language** — Full i18n support (EN, RU, ES, DE)
-- **Telegram Bot Fallback** — Approve/edit/skip comments directly in chat
+Use this as your GitHub repository description:
+
+> AI-powered Telegram Mini App for LinkedIn & Reddit engagement automation with approval queue, warm-up mode, anti-ban limits, and live session logs.
+
+## Suggested GitHub Topics
+
+Add these topics in your repo settings:
+
+- `telegram-bot`
+- `telegram-mini-app`
+- `linkedin-automation`
+- `reddit-bot`
+- `ai-comments`
+- `playwright`
+- `flask`
+- `react`
+- `growth-automation`
+- `social-media-automation`
+
+---
+
+## What Engagr Does
+
+- Generates contextual AI comments for LinkedIn and Reddit.
+- Lets you approve, edit, skip, or regenerate comments before posting.
+- Runs scheduled engagement sessions with jittered timing and daily limits.
+- Supports warm-up mode for safer account ramp-up.
+- Shows live session logs so users can see what automation is doing.
+
+---
+
+## Core Features
+
+- 🤖 **AI Comment Generation** with selectable tone/persona.
+- 🔗 **LinkedIn Automation** via browser-based workflow and session cookies.
+- 🧡 **Reddit Automation** with API-based integration.
+- 📱 **Telegram Mini App UI** for onboarding, dashboard, queue, and settings.
+- 💬 **Telegram Chat Fallback** for approvals directly in bot chat.
+- ⏰ **Smart Scheduling** with per-platform sessions.
+- 🛡️ **Anti-ban Controls**: jitter, hard daily caps, and pacing.
+- 📊 **Live Session Visibility**: logs + health/status widgets.
 
 ---
 
 ## Quick Start
 
-### 1. Prerequisites
+### 1) Requirements
 
 - Python 3.11+
 - Node.js 18+
-- A Telegram bot (via [@BotFather](https://t.me/BotFather))
+- Telegram bot token from [@BotFather](https://t.me/BotFather)
 
-### 2. Clone & Install
+### 2) Install
 
 ```bash
 git clone https://github.com/Leks2000/Engagr.git
@@ -63,27 +76,25 @@ npm run build
 cd ..
 ```
 
-### 3. Configure Environment
+### 3) Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your credentials:
+Fill required values:
 
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 GROQ_API_KEY=your_groq_api_key
-MINI_APP_URL=https://your-deployed-frontend-url.com
+MINI_APP_URL=https://your-frontend-url.com
 ```
 
-### 4. Run Locally
+### 4) Run
 
 ```bash
 python backend/main.py
 ```
-
-The bot starts polling Telegram, Flask API runs on port 5000, and the scheduler activates.
 
 For frontend development:
 
@@ -94,46 +105,35 @@ npm run dev
 
 ---
 
+## LinkedIn Setup Notes
+
+- Preferred approach: import valid session cookie (`li_at`) through the app flow.
+- If session expires, reconnect account and refresh cookie/session.
+- Use moderate limits and warm-up mode for newer accounts.
+
+---
+
 ## Project Structure
 
-```
+```text
 engagr/
 ├── backend/
-│   ├── main.py               # Entry point: Flask API + Telegram bot + scheduler
-│   ├── config.py             # Environment vars, constants, daily limits
-│   ├── storage.py            # JSON-based per-user data storage
-│   ├── ai_comment.py         # Groq API comment generation (3 variants + translation)
-│   ├── linkedin.py           # LinkedIn API integration (OAuth + cookie)
-│   ├── reddit_bot.py         # Reddit via asyncpraw
-│   ├── scheduler.py          # APScheduler session management
-│   ├── telegram_bot.py       # Telegram bot commands & approval flow
-│   ├── humanness_scorer.py   # AI post detection & filtering
-│   ├── interaction_memory.py # CRM: tracks interactions with authors
-│   ├── invite_generator.py   # LinkedIn invite message generator (300 char)
-│   ├── daily_digest.py       # Daily top-3 posts digest for Telegram
-│   ├── nested_replies.py     # Tracks replies to our comments
-│   ├── news_grounding.py     # HackerNews/TechCrunch/PH aggregator
-│   ├── smart_schedule.py     # Optimal posting time calculator
-│   └── setup.py              # LinkedIn login cookie helper
+│   ├── main.py
+│   ├── config.py
+│   ├── storage.py
+│   ├── ai_comment.py
+│   ├── linkedin.py
+│   ├── reddit_bot.py
+│   ├── scheduler.py
+│   ├── telegram_bot.py
+│   └── setup.py
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx           # Root component + routing
+│   │   ├── App.jsx
 │   │   ├── screens/
-│   │   │   ├── Onboarding.jsx
-│   │   │   ├── Dashboard.jsx     # Stats, analytics, smart schedule
-│   │   │   ├── Queue.jsx         # Semi-auto comment queue
-│   │   │   ├── LinkedInSettings.jsx
-│   │   │   └── RedditSettings.jsx
 │   │   └── components/
-│   │       ├── Card.jsx      # Queue card with copy/like/invite buttons
-│   │       ├── Slider.jsx
-│   │       ├── TagInput.jsx
-│   │       └── Toggle.jsx
 │   ├── index.html
-│   ├── tailwind.config.js
 │   └── vite.config.js
-├── data/                     # Auto-created: per-user JSON storage
-├── .env.example
 ├── requirements.txt
 ├── railway.toml
 └── README.md

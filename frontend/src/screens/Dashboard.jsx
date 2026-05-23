@@ -78,92 +78,28 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   const [toast, setToast] = useState('')
   const [running, setRunning] = useState(false)
   const [logs, setLogs] = useState([])
-  const [logExpanded, setLogExpanded] = useState(false)
-  const logEndRef = useRef(null)
-
-  // Analytics
-  const [analyticsTab, setAnalyticsTab] = useState('weekly')
-  const [weeklyData, setWeeklyData] = useState(null)
-  const [monthlyData, setMonthlyData] = useState(null)
-
-  // Smart Schedule
-  const [smartTimes, setSmartTimes] = useState(null)
-  const [smartLoading, setSmartLoading] = useState(false)
-
-  // Replies
-  const [replies, setReplies] = useState([])
-
-  // News
-  const [trendingNews, setTrendingNews] = useState([])
-
-  const t = DASH_I18N[language] || DASH_I18N.en
+  const [logsSupported, setLogsSupported] = useState(true)
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
     setLoading(false)
   }, [uid])
 
-  useEffect(() => {
-    loadStats()
-    const interval = setInterval(loadStats, 30000)
-    return () => clearInterval(interval)
-  }, [loadStats])
-
+  useEffect(() => { loadStats(); const interval = setInterval(loadStats, 30000); return () => clearInterval(interval) }, [loadStats])
   useEffect(() => {
     const loadLogs = async () => {
+      if (!logsSupported) return
       try {
         const data = await api.get(`/api/session/logs/${uid}`)
         setLogs(data?.logs || [])
-      } catch {}
+      } catch (e) {
+        if (String(e?.message || '').includes('404')) setLogsSupported(false)
+      }
     }
     loadLogs()
     const timer = setInterval(loadLogs, 5000)
     return () => clearInterval(timer)
-  }, [uid])
-
-  useEffect(() => {
-    if (logExpanded && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [logs, logExpanded])
-
-  // Load analytics
-  useEffect(() => {
-    const loadAnalytics = async () => {
-      try {
-        const weekly = await api.get(`/api/analytics/${uid}/weekly`)
-        setWeeklyData(weekly)
-        const monthly = await api.get(`/api/analytics/${uid}/monthly`)
-        setMonthlyData(monthly)
-      } catch {}
-    }
-    loadAnalytics()
-  }, [uid])
-
-  // Load replies
-  useEffect(() => {
-    const loadReplies = async () => {
-      try {
-        const data = await api.get(`/api/replies/${uid}`)
-        setReplies(data?.replies || [])
-      } catch {}
-    }
-    loadReplies()
-    const timer = setInterval(loadReplies, 30000)
-    return () => clearInterval(timer)
-  }, [uid])
-
-  // Load trending news
-  useEffect(() => {
-    const loadNews = async () => {
-      try {
-        const kw = (settings?.linkedin?.keywords || []).slice(0, 3).join(',')
-        const data = await api.get(`/api/news/trending?keywords=${kw}`)
-        setTrendingNews(data?.news || [])
-      } catch {}
-    }
-    loadNews()
-  }, [uid, settings])
+  }, [uid, logsSupported])
 
   const isActive = settings?.session_active !== false
   const toggleSession = async () => {
@@ -403,45 +339,10 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
         </div>
       )}
 
-      {/* Warm-up Mode Card */}
-      <div className="card mb-4" style={{ border: warmupMode ? '2px solid #a7f3d0' : '1px solid #e5e7eb' }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: warmupMode ? '#d1fae5' : '#f1f5f9' }}>
-              <span className="text-lg">{warmupMode ? '🔥' : '❄️'}</span>
-            </div>
-            <div>
-              <p className="text-sm font-semibold">{t.warmupMode}</p>
-              <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>{t.warmupHint}</p>
-            </div>
-          </div>
-          <button
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-            style={{
-              background: warmupMode ? '#d1fae5' : '#f1f5f9',
-              color: warmupMode ? '#065f46' : '#64748b',
-              border: warmupMode ? '1.5px solid #6ee7b7' : '1px solid #e2e8f0',
-            }}
-            onClick={toggleWarmup}
-          >
-            {warmupMode ? t.warmupOn : t.warmupOff}
-          </button>
+      <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
+        <div className="card mb-3 text-xs">
+          Warm-up: {settings?.linkedin?.warmup_mode ? 'ON' : 'OFF'} · Daily target: {settings?.linkedin?.comments_per_day || 5}
         </div>
-        {warmupMode && (
-          <div className="mt-3 pt-3" style={{ borderTop: '1px solid #e2e8f0' }}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.warmupDay} {warmupDay} · {t.warmupTarget}: {warmupTarget}/day</span>
-              <span className="text-xs font-bold" style={{ color: '#065f46' }}>+1 per 3 days</span>
-            </div>
-            <div className="h-1.5 rounded-full" style={{ background: '#e2e8f0' }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min((warmupTarget / 15) * 100, 100)}%`, background: '#10b981' }} />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* LinkedIn Section */}
-      <PlatformSection title="LinkedIn" connected={liConnected} className="mb-4">
         <div className="grid grid-cols-2 gap-3">
           <StatCard label={t.comments} value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
           <StatCard label={t.likes} value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
@@ -474,68 +375,10 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
           </div>
         </div>
       </div>
-
-      {/* Trending News */}
-      {trendingNews.length > 0 && (
-        <div className="card mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-            </svg>
-            <p className="text-xs font-semibold" style={{ color: '#475569' }}>{t.trendingNews}</p>
-          </div>
-          <div className="space-y-1.5">
-            {trendingNews.slice(0, 4).map((item, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                  {item.source === 'HackerNews' ? 'HN' : item.source === 'TechCrunch' ? 'TC' : 'PH'}
-                </span>
-                <p className="text-xs leading-snug" style={{ color: '#334155' }}>{item.title}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Live Terminal Log */}
-      <div className="card" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#ff5f57' }} />
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#febc2e' }} />
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#28c840' }} />
-            </div>
-            <p className="text-xs font-mono font-semibold" style={{ color: '#94a3b8' }}>
-              {t.liveLog}
-            </p>
-          </div>
-          <button
-            className="text-xs font-mono px-2 py-0.5 rounded"
-            style={{ color: '#64748b', background: '#1e293b' }}
-            onClick={() => setLogExpanded(!logExpanded)}
-          >
-            {logExpanded ? '▾' : '▸'}
-          </button>
-        </div>
-        <div
-          className="font-mono text-xs overflow-y-auto transition-all"
-          style={{
-            maxHeight: logExpanded ? 280 : 100,
-            minHeight: 60,
-            color: '#e2e8f0',
-          }}
-        >
-          {logs.length ? (
-            <>
-              {logs.slice(-20).map((l, i) => (
-                <LogLine key={i} text={l} />
-              ))}
-              <div ref={logEndRef} />
-            </>
-          ) : (
-            <p style={{ color: '#475569' }}>$ {t.noEvents}</p>
-          )}
+      <div className="card mt-4">
+        <p className="text-sm font-semibold mb-2">Live session log</p>
+        <div className="text-xs" style={{ maxHeight: 180, overflowY: 'auto', color: 'var(--color-muted)' }}>
+          {!logsSupported ? <p>Log endpoint is not available on this backend yet.</p> : logs.length ? logs.slice(-12).map((l, i) => <p key={i}>{l}</p>) : <p>No events yet.</p>}
         </div>
       </div>
     </div>

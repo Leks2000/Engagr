@@ -93,6 +93,12 @@ export default function Queue({ userId, language = 'en' }) {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [simulating, setSimulating] = useState(false)
   const t = QUEUE_I18N[language] || QUEUE_I18N.en
+  const filteredQueue = queue.filter((item) => platformFilter === 'all' ? true : item.platform === platformFilter)
+  const counts = {
+    all: queue.length,
+    linkedin: queue.filter((i) => i.platform === 'linkedin').length,
+    reddit: queue.filter((i) => i.platform === 'reddit').length,
+  }
 
   const filteredQueue = queue.filter((item) => platformFilter === 'all' ? true : item.platform === platformFilter)
   const counts = {
@@ -295,59 +301,22 @@ export default function Queue({ userId, language = 'en' }) {
           {refreshing ? '⏳' : '↻'} {t.refresh}
         </button>
       </div>
-
-      {/* Platform Filters */}
-      <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+      <div className="flex gap-2 mb-4">
         {[
-          ['all', `${t.all} (${counts.all})`, null],
-          ['linkedin', `LinkedIn (${counts.linkedin})`, '#0A66C2'],
-          ['reddit', `Reddit (${counts.reddit})`, '#FF4500'],
-        ].map(([key, label, color]) => (
+          ['all', `All (${counts.all})`],
+          ['linkedin', `LinkedIn (${counts.linkedin})`],
+          ['reddit', `Reddit (${counts.reddit})`],
+        ].map(([key, label]) => (
           <button
             key={key}
-            className="queue-filter-btn flex-shrink-0"
-            data-active={platformFilter === key}
+            className={`queue-filter-btn animate-pop-in ${platformFilter === key ? `is-active is-${key}` : ''}`}
             onClick={() => setPlatformFilter(key)}
-            style={platformFilter === key && color ? {
-              background: color,
-              color: '#fff',
-              borderColor: color,
-            } : {}}
+            style={{ animationDelay: key === 'all' ? '0ms' : key === 'linkedin' ? '60ms' : '120ms' }}
           >
             {label}
           </button>
         ))}
       </div>
-
-      {/* Bulk Actions */}
-      {filteredQueue.length > 0 && (
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          <button
-            className="flex-shrink-0 text-xs font-medium px-3 py-2 rounded-xl transition-all"
-            style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }}
-            onClick={handleApproveAll}
-            disabled={bulkLoading}
-          >
-            {t.approveAll}
-          </button>
-          <button
-            className="flex-shrink-0 text-xs font-medium px-3 py-2 rounded-xl transition-all"
-            style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}
-            onClick={handleSkipAll}
-            disabled={bulkLoading}
-          >
-            {t.skipAll}
-          </button>
-          <button
-            className="flex-shrink-0 text-xs font-medium px-3 py-2 rounded-xl transition-all"
-            style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde68a' }}
-            onClick={handleSimulate}
-            disabled={simulating}
-          >
-            {simulating ? '⏳ ...' : t.simulate}
-          </button>
-        </div>
-      )}
 
       {filteredQueue.length === 0 ? (
         <div className="text-center py-16 empty-state">

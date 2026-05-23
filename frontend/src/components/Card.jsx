@@ -197,28 +197,16 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
         </div>
       </div>
 
-      {/* Interaction Hint Banner */}
-      {item.interaction_hint && (
-        <div className="text-[11px] px-3 py-1.5 rounded-lg mb-2" style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }}>
-          {item.interaction_hint}
-        </div>
-      )}
-
-      {/* Original Post Context */}
-      {(item.post_text || item.post_excerpt || item.excerpt) && (
-        <div className="queue-card-excerpt" style={{ background: platformBg, borderColor: isLinkedIn ? '#bfdbfe' : '#fed7c3' }}>
-          <p style={{ fontWeight: 700, marginBottom: 6, color: platformColor, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            {L.originalPost}
+      {/* Post Excerpt */}
+      <div className="queue-card-excerpt">
+        <p style={{ fontWeight: 600, marginBottom: 6 }}>Original post context</p>
+        {item.post_text && (
+          <p style={{ marginBottom: 8, opacity: 0.9 }}>
+            {item.post_text.length > 280 ? `${item.post_text.slice(0, 280)}…` : item.post_text}
           </p>
-          {item.post_text ? (
-            <p style={{ marginBottom: 0, opacity: 0.9 }}>
-              {item.post_text.length > 300 ? `${item.post_text.slice(0, 300)}...` : item.post_text}
-            </p>
-          ) : (
-            <p>{item.post_excerpt || item.excerpt || ''}</p>
-          )}
-        </div>
-      )}
+        )}
+        <p>{item.post_excerpt || item.excerpt || ''}</p>
+      </div>
 
       {/* View Post Link */}
       {item.post_url && !item.post_url.includes('sim') && (
