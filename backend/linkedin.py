@@ -53,14 +53,42 @@ def _build_linkedin_cookie_jar(li_at: str, jsessionid: str = "") -> requests.coo
     Passing only li_at always fails with KeyError.
     """
     jar = requests.cookies.RequestsCookieJar()
-    domain = ".www.linkedin.com"
+    domain = ".linkedin.com"
     jar.set("li_at", _clean_cookie_value(li_at, "li_at"), domain=domain, path="/")
     js = _clean_cookie_value(jsessionid, "JSESSIONID")
     if js:
-        if not js.startswith("ajax:"):
-            js = js.lstrip('"').rstrip('"')
-        jar.set("JSESSIONID", f'"{js}"' if not js.startswith('"') else js, domain=domain, path="/")
+        jar.set("JSESSIONID", f'"{js}"', domain=domain, path="/")
     return jar
+
+
+def _voyager_error_message(data: dict, status_code: int | None = None) -> str:
+    """Return a human-readable LinkedIn Voyager error without raising KeyError."""
+    if not isinstance(data, dict):
+        return "LinkedIn returned a non-JSON response while checking cookies."
+
+    message = data.get("message") or data.get("error") or data.get("error_description")
+    status = data.get("status") or status_code
+    service_code = data.get("serviceErrorCode")
+
+    if message:
+        return str(message)
+    if status:
+        suffix = f" (serviceErrorCode {service_code})" if service_code else ""
+        return f"LinkedIn Voyager API returned status {status}{suffix}."
+    return "LinkedIn rejected these cookies without an error message."
+
+
+def _fetch_current_profile(client: Linkedin) -> dict:
+    """Fetch the current account profile using the safer /me endpoint."""
+    profile = client.get_user_profile(use_cache=False)
+    if not isinstance(profile, dict) or not profile:
+        raise ValueError("LinkedIn returned empty profile")
+    status = profile.get("status")
+    if status and status != 200:
+        raise ValueError(_voyager_error_message(profile))
+    if not (profile.get("miniProfile") or profile.get("plainId") or profile.get("publicIdentifier")):
+        raise ValueError(_voyager_error_message(profile))
+    return profile
 
 
 def ensure_client(user_id: str) -> bool:
@@ -92,12 +120,15 @@ def verify_li_at(user_id: str, li_at: str, jsessionid: str = "") -> tuple[bool, 
         try:
             jar = _build_linkedin_cookie_jar(li_at, jsessionid)
             client = Linkedin("", "", cookies=jar, proxies=proxies or {})
-            profile = client.get_profile("me")
-            if not profile:
-                last_error = "LinkedIn returned empty profile"
-                continue
+            profile = _fetch_current_profile(client)
+            mini_profile = profile.get("miniProfile") or {}
             _clients[user_id] = client
-            _profile_ids[user_id] = profile.get("profile_id") or profile.get("public_id") or ""
+            _profile_ids[user_id] = (
+                profile.get("plainId")
+                or mini_profile.get("publicIdentifier")
+                or profile.get("publicIdentifier")
+                or ""
+            )
             _save_auth(user_id, {
                 "auth_method": "cookie",
                 "li_at": li_at,
@@ -106,7 +137,11 @@ def verify_li_at(user_id: str, li_at: str, jsessionid: str = "") -> tuple[bool, 
             logger.info("LinkedIn cookie auth OK user=%s via %s", user_id, label)
             return True, ""
         except KeyError as e:
-            last_error = f"Missing cookie field: {e}. Paste JSESSIONID from DevTools."
+            missing = str(e).strip("'\"")
+            if missing.lower() == "jsessionid":
+                last_error = "JSESSIONID is missing or malformed — copy it from DevTools next to li_at (value starts with ajax:)."
+            else:
+                last_error = f"LinkedIn response was missing field '{missing}'. The pasted cookies were rejected; refresh linkedin.com and copy fresh li_at + JSESSIONID."
         except Exception as e:
             last_error = str(e) or repr(e)
             logger.error("LinkedIn verify_li_at failed user=%s mode=%s: %s", user_id, label, last_error)
