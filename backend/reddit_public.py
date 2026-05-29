@@ -41,6 +41,54 @@ EXCLUDE_KEYWORDS = [
     "nsfw", "politics", "meme", "funny", "rant", "drama",
 ]
 
+_last_diagnostics: dict[str, dict] = {}
+
+KEYWORD_SUBREDDIT_MAP = {
+    "ai": ["ArtificialInteligence", "ChatGPT", "OpenAI", "singularity"],
+    "chatgpt": ["ChatGPT", "OpenAI", "PromptEngineering"],
+    "gpt": ["ChatGPT", "OpenAI", "PromptEngineering"],
+    "claude": ["ClaudeAI", "Anthropic"],
+    "automation": ["automation", "productivity", "workflow", "n8n"],
+    "automotion": ["automation", "productivity", "workflow", "n8n"],
+    "agent": ["AIAgents", "LocalLLaMA", "ArtificialInteligence"],
+    "agents": ["AIAgents", "LocalLLaMA", "ArtificialInteligence"],
+    "vibe coding": ["vibecoding", "webdev", "SideProject", "saas"],
+    "coding": ["webdev", "learnprogramming", "SideProject"],
+    "saas": ["SaaS", "microsaas", "SideProject", "indiehackers"],
+    "startup": ["startups", "Entrepreneur", "SideProject", "indiehackers"],
+    "marketing": ["marketing", "copywriting", "Entrepreneur"],
+    "productivity": ["productivity", "workflow", "GetDisciplined"],
+    "chrome": ["chrome_extensions", "SideProject", "webdev"],
+}
+
+
+def suggest_subreddits(keywords: list[str], limit: int = 12) -> list[str]:
+    """Suggest subreddit names from product/topic keywords."""
+    normalized = [str(k).strip().lower() for k in keywords or [] if str(k).strip()]
+    suggestions: list[str] = []
+
+    def add(name: str) -> None:
+        clean = name.strip().removeprefix("r/")
+        if clean and clean not in suggestions:
+            suggestions.append(clean)
+
+    for keyword in normalized:
+        for needle, subs in KEYWORD_SUBREDDIT_MAP.items():
+            if needle in keyword or keyword in needle:
+                for sub in subs:
+                    add(sub)
+
+    for sub in DEFAULT_SUBREDDITS:
+        add(sub)
+        if len(suggestions) >= limit:
+            break
+
+    return suggestions[:limit]
+
+
+def get_last_diagnostics(user_id: str) -> dict:
+    return _last_diagnostics.get(str(user_id), {})
+
 
 def _seen_path(user_id: str) -> Path:
     return DATA_DIR / str(user_id) / "seen_reddit.json"
@@ -191,8 +239,13 @@ def scrape_posts(user_id: str, max_posts: int = 15) -> list[dict]:
     """Fetch and rank Reddit threads for a user (public API, no login)."""
     settings = storage.get_settings(user_id)
     rd = settings.get("reddit", {})
-    subreddits = rd.get("subreddits") or DEFAULT_SUBREDDITS
+    subreddits = rd.get("subreddits") or suggest_subreddits(
+        (rd.get("keywords") or []) + ((settings.get("linkedin") or {}).get("keywords") or []),
+        limit=10,
+    )
     user_kw = [k.strip().lower() for k in rd.get("keywords", []) if k.strip()]
+    if not user_kw:
+        user_kw = [k.strip().lower() for k in (settings.get("linkedin", {}).get("keywords", []) or []) if k.strip()]
     relevant_keywords = user_kw or [k.lower() for k in DEFAULT_RELEVANT_KEYWORDS]
     limit_per_sub = min(int(rd.get("fetch_limit", 25)), 50)
 
@@ -205,23 +258,38 @@ def scrape_posts(user_id: str, max_posts: int = 15) -> list[dict]:
     skip_ids = seen_ids | queue_ids
 
     all_posts: list[dict] = []
+    per_subreddit: dict[str, int] = {}
     for sub in subreddits:
         posts = fetch_subreddit(sub, limit=limit_per_sub)
+        per_subreddit[sub] = len(posts)
         all_posts.extend(posts)
         time.sleep(random.uniform(1.0, 2.0))
 
     relevant: list[dict] = []
+    reject_reasons: dict[str, int] = {}
     for post in all_posts:
         ok, reason = is_relevant(post, skip_ids, relevant_keywords)
         if ok:
             post["score"] = score_post(post)
             post["relevance_reason"] = reason
             relevant.append(post)
+        else:
+            reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
 
     relevant.sort(key=lambda x: x.get("score", 0), reverse=True)
     top = relevant[:max_posts]
+    diagnostics = {
+        "subreddits": list(subreddits),
+        "keywords": relevant_keywords,
+        "per_subreddit": per_subreddit,
+        "parsed": len(all_posts),
+        "relevant": len(relevant),
+        "returning": len(top),
+        "reject_reasons": reject_reasons,
+    }
+    _last_diagnostics[str(user_id)] = diagnostics
     logger.info(
-        "reddit_public user=%s parsed=%s relevant=%s returning=%s",
-        user_id, len(all_posts), len(relevant), len(top),
+        "reddit_public user=%s parsed=%s relevant=%s returning=%s reject_reasons=%s",
+        user_id, len(all_posts), len(relevant), len(top), reject_reasons,
     )
     return top

@@ -316,8 +316,34 @@ async def run_reddit_session(user_id: str):
     rd_settings = settings.get("reddit", {})
     
     try:
+        configured_subs = rd_settings.get("subreddits") or []
+        configured_keywords = rd_settings.get("keywords") or []
+        if not configured_keywords:
+            configured_keywords = (settings.get("linkedin") or {}).get("keywords") or []
+        _log(
+            user_id,
+            "🔍 Reddit parsing: "
+            f"subreddits={', '.join(configured_subs[:5]) if configured_subs else 'auto'}; "
+            f"keywords={', '.join(configured_keywords[:5]) if configured_keywords else 'default'}",
+        )
         posts = reddit_public.scrape_posts(user_id, max_posts=rd_settings.get("comments_per_day", 5) * 3)
+        diagnostics = reddit_public.get_last_diagnostics(user_id)
+        if diagnostics:
+            _log(
+                user_id,
+                "📄 Reddit parsed "
+                f"{diagnostics.get('parsed', 0)} posts from {len(diagnostics.get('subreddits', []))} subreddits; "
+                f"relevant={diagnostics.get('relevant', 0)}; returning={diagnostics.get('returning', 0)}",
+            )
+            if diagnostics.get("reject_reasons") and diagnostics.get("returning", 0) == 0:
+                top_reasons = sorted(
+                    diagnostics["reject_reasons"].items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[:3]
+                _log(user_id, "ℹ️ Reddit filtered out: " + ", ".join(f"{reason}={count}" for reason, count in top_reasons))
         if not posts and reddit_bot.has_posting_credentials(user_id):
+            _log(user_id, "⚠️ Public Reddit parser found 0 posts; trying account-cookie fallback.")
             posts = reddit_bot.scrape_posts(user_id)
         
         # Calculate remaining comments
@@ -326,7 +352,11 @@ async def run_reddit_session(user_id: str):
             DAILY_LIMITS["reddit_comments"] - stats.get("reddit_comments", 0)
         )
         
+        if not posts:
+            _log(user_id, "⚠️ Reddit queued 0 items. Check subreddits/keywords or parser diagnostics above.")
+
         # Generate comments and add to queue
+        queued_comments = 0
         for post in posts[:remaining_comments]:
             try:
                 comment = ai_comment.generate_comment(post["text"], "reddit")
@@ -348,6 +378,7 @@ async def run_reddit_session(user_id: str):
                 }
                 
                 storage.add_to_queue(user_id, queue_item)
+                queued_comments += 1
                 
                 if _send_queue_item:
                     await _send_queue_item(user_id, queue_item)
@@ -358,6 +389,9 @@ async def run_reddit_session(user_id: str):
                 logger.error(f"Error generating Reddit comment: {e}")
                 continue
         
+        if queued_comments:
+            _log(user_id, f"✅ Reddit queued {queued_comments} comments for review.")
+
         remaining_upvotes = min(
             rd_settings.get("upvotes_per_day", 5),
             DAILY_LIMITS["reddit_upvotes"] - stats.get("reddit_upvotes", 0),

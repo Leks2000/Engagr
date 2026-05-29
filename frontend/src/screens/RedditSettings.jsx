@@ -22,6 +22,11 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [status, setStatus] = useState(rd.connected)
+  const [statusDetails, setStatusDetails] = useState({
+    account_connected: !!rd.account_connected,
+    discovery_connected: !!(rd.discovery_connected || rd.discovery_only || rd.subreddits?.length),
+  })
+  const [suggesting, setSuggesting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
 
   const markDirty = () => setDirty(true)
@@ -36,14 +41,18 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         upvotes_per_day: upvotesPerDay,
         session_times: sessionTimes,
         connected: subreddits.length > 0 || rd.connected,
-        discovery_only: !redditSession,
+        discovery_only: subreddits.length > 0 || rd.discovery_only,
+        discovery_connected: subreddits.length > 0 || rd.discovery_connected,
+        account_connected: rd.account_connected,
       },
     }
     onSettingsUpdate(payload)
     if (subreddits.length > 0) {
       try {
         await api.post(`/api/reddit/discovery/${uid}`)
-      } catch (_) {}
+      } catch {
+        // Discovery can still be saved through settings; this endpoint only reschedules jobs.
+      }
     }
     setDirty(false)
   }
@@ -67,27 +76,45 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
           reddit: {
             ...rd,
             connected: true,
+            account_connected: true,
             reddit_username: res.username || rd.reddit_username,
           },
         })
       }
     } catch (e) {
-      try {
-        const resp = await fetch('/api/reddit/cookie', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: uid, reddit_session: redditSession, token_v2: tokenV2 }),
-        })
-        const data = await resp.json()
-        setLoginError(data.error || 'Login failed')
-      } catch {
-        setLoginError(e.message || 'Login failed')
-      }
+      setLoginError(e.body?.error || e.message || 'Login failed')
     }
     setConnecting(false)
   }
 
-  useEffect(() => { (async () => { try { const st = await api.get(`/api/reddit/check/${uid}`); setStatus(!!st.connected) } catch {} })() }, [uid])
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await api.get(`/api/reddit/check/${uid}`)
+        setStatus(!!st.connected)
+        setStatusDetails(st)
+      } catch {
+        // Keep the local settings-derived status if the status check is temporarily unavailable.
+      }
+    })()
+  }, [uid])
+
+  const suggestSubreddits = async () => {
+    setSuggesting(true)
+    try {
+      const query = encodeURIComponent(keywords.join(','))
+      const res = await api.get(`/api/reddit/subreddit-suggestions/${uid}${query ? `?keywords=${query}` : ''}`)
+      const merged = [...subreddits]
+      for (const sub of res.subreddits || []) {
+        if (!merged.includes(sub)) merged.push(sub)
+      }
+      setSubreddits(merged.slice(0, 12))
+      markDirty()
+    } catch (e) {
+      setLoginError(e.message || 'Failed to suggest subreddits')
+    }
+    setSuggesting(false)
+  }
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
@@ -97,10 +124,14 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         reddit: {
           ...rd,
           connected: false,
+          account_connected: false,
+          discovery_connected: false,
           reddit_username: '',
         },
       })
-    } catch (e) {}
+    } catch {
+      // Ignore disconnect errors; settings will be refreshed on the next load.
+    }
     setDisconnecting(false)
   }
 
@@ -137,7 +168,7 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         </div>
         {status ? (
           <span className="text-xs px-2 py-1 rounded" style={{ background: '#e8f5e9', color: 'var(--color-success)' }}>
-            ● Connected
+            ● {statusDetails.account_connected ? 'Account connected' : 'Discovery connected'}
           </span>
         ) : (
           <span className="text-xs px-2 py-1 rounded" style={{ background: '#fff3e0', color: 'var(--color-warning)' }}>
@@ -147,8 +178,8 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
       </div>
 
       {/* Connection Card */}
-      <Section title="Account" subtitle={rd.connected ? `Logged in as u/${rd.reddit_username || '...'}` : 'Connect your Reddit account'}>
-        {status ? (
+      <Section title="Account" subtitle={statusDetails.account_connected ? `Logged in as u/${rd.reddit_username || '...'}` : 'Account cookies optional; public discovery works from subreddits'}>
+        {statusDetails.account_connected ? (
           <div className="card flex items-center justify-between py-3">
             <div className="flex items-center gap-2">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="#FF4500">
@@ -231,6 +262,14 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
 
       {/* Subreddits */}
       <Section title="Subreddits" subtitle="Target subreddits for engagement">
+        <button
+          className="mb-3 px-3 py-2 rounded-xl text-xs font-medium"
+          style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}
+          onClick={suggestSubreddits}
+          disabled={suggesting}
+        >
+          {suggesting ? 'Suggesting…' : 'Suggest from keywords'}
+        </button>
         <TagInput
           tags={subreddits}
           onChange={(tags) => { setSubreddits(tags); markDirty() }}
