@@ -15,6 +15,7 @@ import humanness_scorer
 logger = logging.getLogger(__name__)
 
 _send_callback = None
+_last_digest: dict[str, list[dict]] = {}
 
 
 def set_send_callback(callback):
@@ -138,10 +139,22 @@ async def send_daily_digest(user_id: str):
                 "comment_variants": item["comment_variants"],
             })
         
+        _last_digest[user_id] = result
         logger.info("Daily digest sent to user %s (%d items)", user_id, len(items))
-        
+
     except Exception as e:
         logger.error("Failed to send daily digest to user %s: %s", user_id, e)
+
+
+def get_last_digest(user_id: str) -> list[dict]:
+    return _last_digest.get(user_id, [])
+
+
+def set_last_digest_item(user_id: str, index: int, item: dict) -> None:
+    items = _last_digest.get(user_id, [])
+    if 0 <= index < len(items):
+        items[index] = item
+        _last_digest[user_id] = items
 
 
 def get_digest_schedule_time(user_id: str) -> str:

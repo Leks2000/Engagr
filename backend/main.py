@@ -517,7 +517,22 @@ def linkedin_check(user_id):
 
 @api.route("/api/reddit/auth/<user_id>", methods=["GET"])
 def reddit_auth(user_id):
-    return jsonify({"error": "Reddit OAuth not implemented", "url": ""}), 501
+    return jsonify({
+        "error": "Reddit OAuth not available",
+        "message": "Use public feed discovery — add subreddits in settings.",
+        "url": "",
+    }), 501
+
+
+@api.route("/api/reddit/discovery/<user_id>", methods=["POST"])
+def reddit_enable_discovery(user_id):
+    """Enable Reddit discovery without API credentials."""
+    try:
+        storage.update_settings(user_id, {"reddit": {"connected": True, "discovery_only": True}})
+        sched_module.schedule_user_sessions(user_id)
+        return jsonify({"connected": True, "mode": "discovery"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @api.route("/api/reddit/cookie", methods=["POST"])
@@ -540,9 +555,17 @@ def reddit_cookie():
 @api.route("/api/reddit/check/<user_id>", methods=["GET"])
 def reddit_check(user_id):
     import reddit_bot
-    connected = reddit_bot.check_login(user_id)
+    settings = storage.get_settings(user_id)
+    rd = settings.get("reddit", {})
+    has_api = reddit_bot.check_login(user_id)
+    has_discovery = bool(rd.get("subreddits")) or rd.get("discovery_only", False)
+    connected = has_api or has_discovery or rd.get("connected", False)
     storage.update_settings(user_id, {"reddit": {"connected": connected}})
-    return jsonify({"connected": connected})
+    return jsonify({
+        "connected": connected,
+        "discovery": has_discovery,
+        "api_login": has_api,
+    })
 
 
 @api.route("/api/linkedin/warmup/<user_id>", methods=["POST"])
@@ -655,12 +678,15 @@ def run_session_now(user_id):
 
         sched_module._log(user_id, f"🔍 Searching posts by keywords: {', '.join(keywords[:3])}...")
         auth = linkedin._load_auth(user_id)
-        logger.info("run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s", user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")))
-        posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
-        if not posts:
-            sched_module._log(user_id, "⚠️ OAuth scrape returned 0 posts. Trying cookie-based fallback...")
-            logger.warning("LinkedIn OAuth scrape returned 0 posts user=%s; trying linkedin-api session scrape fallback", user_id)
-            posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
+        logger.info(
+            "run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s",
+            user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")),
+        )
+        linkedin.ensure_client(user_id)
+        posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
+        if not posts and auth.get("access_token"):
+            sched_module._log(user_id, "⚠️ Feed scrape empty. Trying OAuth (own posts only)...")
+            posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
 
         # Apply humanness filter — skip AI-generated posts
@@ -738,6 +764,19 @@ def run_session_now(user_id):
     except Exception as e:
         sched_module._log(user_id, f"❌ Session error: {str(e)[:120]}")
         logger.error("manual session run failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/reddit/session/run/<user_id>", methods=["POST"])
+def run_reddit_session_now(user_id):
+    """Manually trigger Reddit discovery session (public .json parser)."""
+    try:
+        asyncio.run_coroutine_threadsafe(
+            sched_module.run_reddit_session(user_id),
+            _loop,
+        )
+        return jsonify({"status": "started"})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
@@ -997,46 +1036,32 @@ async def _post_item_delayed(user_id: str, item: dict):
     """Post an approved item after a random delay."""
     import random
     from config import DELAYS
+    import queue_executor
 
-    delay = random.uniform(*DELAYS["comment"])
-    logger.info(f"Posting item {item['id']} in {int(delay/60)} minutes")
+    action = item.get("action", "comment")
+    delay_key = "like" if action in ("like", "upvote") else "comment"
+    delay = random.uniform(*DELAYS[delay_key])
+    logger.info("Posting item %s action=%s in %s sec", item["id"], action, int(delay))
     await asyncio.sleep(delay)
 
-    success = False
-    platform = item.get("platform", "")
-
-    if platform == "linkedin":
-        import linkedin
-        pw = sched_module._playwright
-        if pw and item.get("post_url"):
-            success = await linkedin.post_comment(pw, item["post_url"], item["comment"], user_id)
-        if success:
-            storage.increment_stat(user_id, "linkedin_comments")
-    elif platform == "reddit":
-        import reddit_bot
-        reddit_id = item.get("reddit_id", "")
-        if reddit_id:
-            success = reddit_bot.post_comment(user_id, reddit_id, item["comment"])
-        if success:
-            storage.increment_stat(user_id, "reddit_comments")
-
+    success, _msg = await queue_executor.execute_queue_item(user_id, item)
     storage.remove_from_queue(user_id, item["id"])
 
-    # Track for nested replies
+    platform = item.get("platform", "")
+
     if success:
         try:
             nested_replies.track_posted_comment(user_id, item)
         except Exception as e:
             logger.error("Failed to track posted comment: %s", e)
 
-        # Record in interaction memory
         try:
             interaction_memory.record_interaction(
                 user_id=user_id,
                 author_name=item.get("author_name", "") or item.get("author", ""),
                 author_profile_url=item.get("post_url", ""),
                 platform=platform,
-                interaction_type="comment",
+                interaction_type=item.get("action", "comment"),
                 post_url=item.get("post_url", ""),
                 our_message=item.get("comment", ""),
             )
@@ -1116,7 +1141,7 @@ async def main():
 
     # Start scheduler
     sched_module.start_scheduler()
-
+    sched_module.reschedule_all_users()
 
     # Create and run Telegram bot
     bot_app = telegram_bot.create_bot()

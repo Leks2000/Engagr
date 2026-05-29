@@ -4,7 +4,8 @@ import { api } from '../App'
 const DASH_I18N = {
   en: {
     title: 'Dashboard', subtitle: "Today · Engagement performance",
-    runSession: 'Run Session', running: 'Running...', active: 'Active', paused: 'Paused',
+    runSession: 'Run LinkedIn', runReddit: 'Run Reddit', running: 'Running...', active: 'Active', paused: 'Paused',
+    connectLinkedIn: 'Connect LinkedIn for sessions', connectReddit: 'Add subreddits in Reddit settings',
     comments: 'Comments', likes: 'Likes', added: 'People Added', upvotes: 'Upvotes',
     today: 'Today', nextSessions: 'Next Sessions', totalToday: 'Total Today',
     warmupMode: 'Warm-up Mode', warmupOn: 'ON', warmupOff: 'OFF',
@@ -21,7 +22,8 @@ const DASH_I18N = {
   },
   ru: {
     title: 'Главная', subtitle: "Сегодня · Эффективность",
-    runSession: 'Запустить', running: 'Запуск...', active: 'Активно', paused: 'Пауза',
+    runSession: 'LinkedIn', runReddit: 'Reddit', running: 'Запуск...', active: 'Активно', paused: 'Пауза',
+    connectLinkedIn: 'Подключите LinkedIn (li_at)', connectReddit: 'Добавьте сабреддиты в настройках Reddit',
     comments: 'Комментарии', likes: 'Лайки', added: 'Добавлено', upvotes: 'Апвоуты',
     today: 'Сегодня', nextSessions: 'Следующие сессии', totalToday: 'Всего сегодня',
     warmupMode: 'Режим прогрева', warmupOn: 'ВКЛ', warmupOff: 'ВЫКЛ',
@@ -73,12 +75,20 @@ const DASH_I18N = {
 }
 
 export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate, language = 'en' }) {
+  const t = DASH_I18N[language] || DASH_I18N.en
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
-  const [running, setRunning] = useState(false)
+  const [runningLi, setRunningLi] = useState(false)
+  const [runningRd, setRunningRd] = useState(false)
   const [logs, setLogs] = useState([])
   const [logsSupported, setLogsSupported] = useState(true)
+  const [analyticsTab, setAnalyticsTab] = useState('weekly')
+  const [weeklyData, setWeeklyData] = useState(null)
+  const [monthlyData, setMonthlyData] = useState(null)
+  const [smartTimes, setSmartTimes] = useState(null)
+  const [smartLoading, setSmartLoading] = useState(false)
+  const [replies, setReplies] = useState([])
 
   const loadStats = useCallback(async () => {
     try { setStats(await api.get(`/api/stats/${uid}`)) } catch (err) { console.error('Failed to load stats:', err) }
@@ -86,6 +96,35 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   }, [uid])
 
   useEffect(() => { loadStats(); const interval = setInterval(loadStats, 30000); return () => clearInterval(interval) }, [loadStats])
+
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      try {
+        const [w, m] = await Promise.all([
+          api.get(`/api/analytics/${uid}/weekly`),
+          api.get(`/api/analytics/${uid}/monthly`),
+        ])
+        setWeeklyData(w)
+        setMonthlyData(m)
+      } catch (err) {
+        console.error('Analytics load failed:', err)
+      }
+    }
+    loadAnalytics()
+  }, [uid])
+
+  useEffect(() => {
+    const loadReplies = async () => {
+      try {
+        const data = await api.get(`/api/replies/${uid}`)
+        setReplies(data?.replies || [])
+      } catch {
+        setReplies([])
+      }
+    }
+    loadReplies()
+  }, [uid])
+
   useEffect(() => {
     const loadLogs = async () => {
       if (!logsSupported) return
@@ -111,22 +150,34 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
     }
   }
 
-  const runSession = async () => {
-    setRunning(true)
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 4500)
+  }
+
+  const runLinkedInSession = async () => {
+    setRunningLi(true)
     try {
       const res = await api.post(`/api/session/run/${uid}`)
       const count = res?.queued || 0
-      const msg = count > 0 ? `Added ${count} posts to queue` : 'No posts found. Check keywords and connection.'
-      setToast(msg)
-      setTimeout(() => setToast(''), 4000)
-      if (count > 0 && onNavigate) {
-        setTimeout(() => onNavigate('queue'), 1500)
-      }
-    } catch (err) {
-      setToast('Failed to run session')
-      setTimeout(() => setToast(''), 3000)
+      showToast(count > 0 ? `LinkedIn: ${count} in queue` : 'No LinkedIn posts. Check li_at cookie & keywords.')
+      if (count > 0 && onNavigate) setTimeout(() => onNavigate('queue'), 1200)
+    } catch {
+      showToast('LinkedIn session failed')
     }
-    setRunning(false)
+    setRunningLi(false)
+  }
+
+  const runRedditSession = async () => {
+    setRunningRd(true)
+    try {
+      await api.post(`/api/reddit/session/run/${uid}`)
+      showToast('Reddit session started — check Telegram for approval cards')
+      setTimeout(() => onNavigate?.('queue'), 2000)
+    } catch {
+      showToast('Reddit session failed')
+    }
+    setRunningRd(false)
   }
 
   // Smart Schedule
@@ -170,7 +221,7 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
   )
 
   const liConnected = settings?.linkedin?.connected
-  const rdConnected = settings?.reddit?.connected
+  const rdConnected = settings?.reddit?.connected || (settings?.reddit?.subreddits?.length > 0)
   const activeAnalytics = analyticsTab === 'weekly' ? weeklyData : monthlyData
   const chartData = analyticsTab === 'weekly' ? weeklyData?.weekly : monthlyData?.monthly
 
@@ -182,22 +233,37 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
           <h1 className="text-xl font-bold tracking-tight">{t.title}</h1>
           <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{t.subtitle}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
           <button
             className="btn btn-sm btn-run-session"
-            onClick={runSession}
-            disabled={running}
+            onClick={runLinkedInSession}
+            disabled={runningLi || runningRd}
+            title={liConnected ? '' : t.connectLinkedIn}
           >
-            {running ? (
-              <><span className="spinner-sm" /> {t.running}</>
-            ) : t.runSession}
+            {runningLi ? <><span className="spinner-sm" /> {t.running}</> : t.runSession}
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={runRedditSession}
+            disabled={runningLi || runningRd}
+            style={{ borderColor: '#FF4500', color: '#FF4500' }}
+            title={rdConnected ? '' : t.connectReddit}
+          >
+            {runningRd ? <><span className="spinner-sm" /> …</> : t.runReddit}
           </button>
           <button className="btn btn-sm" onClick={toggleSession}>
-            <span className={`status-dot ${isActive ? 'active' : 'paused'}`}></span>
+            <span className={`status-dot ${isActive ? 'active' : 'paused'}`} />
             {isActive ? t.active : t.paused}
           </button>
         </div>
       </div>
+
+      {(!liConnected || !rdConnected) && (
+        <div className="card mb-4 text-xs space-y-1" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+          {!liConnected && <p>⚠️ {t.connectLinkedIn}</p>}
+          {!rdConnected && <p>⚠️ {t.connectReddit}</p>}
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
@@ -339,10 +405,27 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
         </div>
       )}
 
-      <PlatformSection title="LinkedIn" connected={settings?.linkedin?.connected} className="mb-4">
-        <div className="card mb-3 text-xs">
-          Warm-up: {settings?.linkedin?.warmup_mode ? 'ON' : 'OFF'} · Daily target: {settings?.linkedin?.comments_per_day || 5}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold">{t.warmupMode}</p>
+            <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>{t.warmupHint}</p>
+          </div>
+          <button
+            className="text-xs px-3 py-1.5 rounded-lg font-medium"
+            style={{
+              background: warmupMode ? '#e8f5e9' : '#f1f5f9',
+              color: warmupMode ? '#1b5e20' : '#64748b',
+              border: `1px solid ${warmupMode ? '#a5d6a7' : '#e2e8f0'}`,
+            }}
+            onClick={toggleWarmup}
+          >
+            {warmupMode ? t.warmupOn : t.warmupOff} · {t.warmupDay} {warmupDay} · {t.warmupTarget} {warmupTarget}
+          </button>
         </div>
+      </div>
+
+      <PlatformSection title="LinkedIn" connected={liConnected} className="mb-4">
         <div className="grid grid-cols-2 gap-3">
           <StatCard label={t.comments} value={stats?.linkedin_comments || 0} max={settings?.linkedin?.comments_per_day || 15} icon={<MessageIcon />} tone="linkedin" />
           <StatCard label={t.likes} value={stats?.linkedin_likes || 0} max={settings?.linkedin?.likes_per_day || 5} icon={<LikeIcon />} tone="linkedin" />
@@ -375,10 +458,16 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
           </div>
         </div>
       </div>
-      <div className="card mt-4">
-        <p className="text-sm font-semibold mb-2">Live session log</p>
-        <div className="text-xs" style={{ maxHeight: 180, overflowY: 'auto', color: 'var(--color-muted)' }}>
-          {!logsSupported ? <p>Log endpoint is not available on this backend yet.</p> : logs.length ? logs.slice(-12).map((l, i) => <p key={i}>{l}</p>) : <p>No events yet.</p>}
+      <div className="card mt-4 log-panel">
+        <p className="text-sm font-semibold mb-2">{t.liveLog}</p>
+        <div className="text-xs font-mono" style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {!logsSupported ? (
+            <p style={{ color: 'var(--color-muted)' }}>Log endpoint unavailable.</p>
+          ) : logs.length ? (
+            logs.slice(-14).map((l, i) => <LogLine key={i} text={l} />)
+          ) : (
+            <p style={{ color: 'var(--color-muted)' }}>{t.noEvents}</p>
+          )}
         </div>
       </div>
     </div>

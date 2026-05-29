@@ -26,8 +26,8 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
 
   const markDirty = () => setDirty(true)
 
-  const save = () => {
-    onSettingsUpdate({
+  const save = async () => {
+    const payload = {
       reddit: {
         ...rd,
         subreddits,
@@ -35,8 +35,16 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
         comments_per_day: commentsPerDay,
         upvotes_per_day: upvotesPerDay,
         session_times: sessionTimes,
+        connected: subreddits.length > 0 || rd.connected,
+        discovery_only: !redditSession,
       },
-    })
+    }
+    onSettingsUpdate(payload)
+    if (subreddits.length > 0) {
+      try {
+        await api.post(`/api/reddit/discovery/${uid}`)
+      } catch (_) {}
+    }
     setDirty(false)
   }
 
@@ -162,9 +170,9 @@ export default function RedditSettings({ userId: propUserId, settings, onSetting
             <div className="flex items-start gap-3 mb-4">
               <span className="text-xl">🛡️</span>
               <div>
-                <p className="font-medium text-sm mb-1">Secure login</p>
+                <p className="font-medium text-sm mb-1">Discovery works without login</p>
                 <p className="text-xs" style={{ color: 'var(--color-muted)' }}>
-                  Your password is used once to create a session. Only cookies are saved.
+                  Add subreddits below and save — bot parses public feeds. Cookies optional for auto-posting.
                 </p>
               </div>
             </div>

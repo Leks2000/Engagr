@@ -31,6 +31,16 @@ def _save_auth(user_id: str, auth_data: dict) -> None:
     path.write_text(json.dumps(auth_data))
 
 
+def ensure_client(user_id: str) -> bool:
+    """Load linkedin-api client from saved li_at if not in memory."""
+    if user_id in _clients:
+        return True
+    auth = _load_auth(user_id)
+    if auth.get("li_at"):
+        return verify_li_at(user_id, auth["li_at"])
+    return False
+
+
 def verify_li_at(user_id: str, li_at: str) -> bool:
     try:
         proxies = _proxy_dict(user_id)
@@ -121,7 +131,10 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
 
 
 async def scrape_posts(_playwright_unused, keywords: list[str], max_posts: int = 10, user_id: str | None = None) -> list[dict]:
-    client = _clients.get(user_id or "")
+    uid = user_id or ""
+    if uid and uid not in _clients:
+        ensure_client(uid)
+    client = _clients.get(uid)
     if not client:
         return []
     posts = []

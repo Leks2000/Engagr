@@ -96,6 +96,18 @@ body {
   transform: translateY(-1px);
 }
 
+.card.metric-card:hover,
+.log-panel:hover {
+  transform: none;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ── Range Slider ────────────────────────────── */
 input[type="range"] {
   -webkit-appearance: none;

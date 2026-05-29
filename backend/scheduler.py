@@ -17,6 +17,7 @@ from config import DAILY_LIMITS, DELAYS
 import storage
 import linkedin
 import reddit_bot
+import reddit_public
 import ai_comment
 
 logger = logging.getLogger(__name__)
@@ -68,10 +69,11 @@ def schedule_user_sessions(user_id: str):
     Schedule sessions for a user based on their settings.
     Removes old jobs and creates new ones.
     """
-    # Remove existing jobs for this user
+    import daily_digest
+
     existing_jobs = scheduler.get_jobs()
     for job in existing_jobs:
-        if job.id.startswith(f"session_{user_id}_"):
+        if job.id.startswith(f"session_{user_id}_") or job.id == f"digest_{user_id}":
             scheduler.remove_job(job.id)
     
     settings = storage.get_settings(user_id)
@@ -106,9 +108,9 @@ def schedule_user_sessions(user_id: str):
             except (ValueError, AttributeError) as e:
                 logger.error(f"Invalid time format '{time_str}': {e}")
     
-    # Schedule Reddit sessions
+    # Schedule Reddit sessions (discovery works without Reddit API login)
     rd_settings = settings.get("reddit", {})
-    if rd_settings.get("connected", False):
+    if rd_settings.get("connected", False) or rd_settings.get("subreddits"):
         for i, time_str in enumerate(rd_settings.get("session_times", [])):
             try:
                 hour, minute = map(int, time_str.split(":"))
@@ -124,6 +126,41 @@ def schedule_user_sessions(user_id: str):
                 logger.info(f"Scheduled Reddit session for user {user_id} at {time_str}")
             except (ValueError, AttributeError) as e:
                 logger.error(f"Invalid time format '{time_str}': {e}")
+
+    if settings.get("session_active", True) and settings.get("news_grounding_enabled", True):
+        try:
+            digest_time = daily_digest.get_digest_schedule_time(user_id)
+            dh, dm = map(int, digest_time.split(":"))
+            scheduler.add_job(
+                run_daily_digest_job,
+                CronTrigger(hour=dh, minute=dm),
+                id=f"digest_{user_id}",
+                args=[user_id],
+                replace_existing=True,
+                misfire_grace_time=600,
+            )
+            logger.info("Scheduled daily digest for user %s at %s UTC", user_id, digest_time)
+        except (ValueError, AttributeError) as e:
+            logger.error("Invalid digest time for user %s: %s", user_id, e)
+
+
+def reschedule_all_users():
+    """Re-register cron jobs for every user data folder (on server boot)."""
+    from config import DATA_DIR
+
+    if not DATA_DIR.exists():
+        return
+    count = 0
+    for user_dir in DATA_DIR.iterdir():
+        if user_dir.is_dir() and user_dir.name.isdigit():
+            schedule_user_sessions(user_dir.name)
+            count += 1
+    logger.info("Rescheduled sessions for %s users", count)
+
+
+async def run_daily_digest_job(user_id: str):
+    import daily_digest
+    await daily_digest.send_daily_digest(user_id)
 
 
 # ── Session Runners ───────────────────────────────────
@@ -145,17 +182,20 @@ async def run_linkedin_session(user_id: str):
         return
     
     try:
-        # Check login
-        if _playwright and not await linkedin.check_login(_playwright, user_id):
+        linkedin.ensure_client(user_id)
+        if not await linkedin.check_login(user_id=user_id):
             if _send_queue_item:
                 await _send_queue_item(user_id, {
                     "type": "error",
-                    "message": "⚠️ LinkedIn cookies expired. Please re-login through the app."
+                    "message": "⚠️ LinkedIn not connected. Add li_at cookie in the Mini App (Settings → LinkedIn).",
                 })
             return
-        
-        # Scrape posts
-        posts = await linkedin.scrape_posts(_playwright, keywords, user_id=user_id) if _playwright else []
+
+        posts = await linkedin.scrape_posts(None, keywords, user_id=user_id)
+        if not posts:
+            auth = linkedin._load_auth(user_id)
+            if auth.get("access_token") and not auth.get("li_at"):
+                _log(user_id, "Feed empty — OAuth cannot search global feed. Add li_at cookie for discovery.")
         
         # Calculate how many comments we can still post today
         configured_comments = li_settings.get("comments_per_day", 5)
@@ -192,13 +232,14 @@ async def run_linkedin_session(user_id: str):
                 queue_item = {
                     "id": str(uuid.uuid4()),
                     "platform": "linkedin",
+                    "action": "comment",
                     "post_id": post["id"],
                     "post_url": post.get("url", ""),
-                    "post_excerpt": post["excerpt"],
+                    "post_excerpt": post.get("excerpt", post.get("text", "")[:200]),
                     "post_text": post["text"],
                     "comment": comment,
                     "status": "pending",
-                    "author": post.get("author", ""),
+                    "author": post.get("author", "") or post.get("author_name", ""),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
                 
@@ -217,41 +258,35 @@ async def run_linkedin_session(user_id: str):
                 logger.error(f"Error generating comment for post: {e}")
                 continue
         
-        # Like posts
+        # Suggest likes (human approval in DM)
         remaining_likes = min(
             li_settings.get("likes_per_day", 5),
-            DAILY_LIMITS["linkedin_likes"] - stats.get("linkedin_likes", 0)
+            DAILY_LIMITS["linkedin_likes"] - stats.get("linkedin_likes", 0),
         )
-        
-        for post in posts[:remaining_likes]:
-            if post.get("url") and _playwright:
-                try:
-                    success = await linkedin.like_post(_playwright, post["url"], user_id=user_id)
-                    if success:
-                        storage.increment_stat(user_id, "linkedin_likes")
-                    await asyncio.sleep(random.uniform(*DELAYS["like"]))
-                except Exception as e:
-                    logger.error(f"Error liking post: {e}")
-        
-        # Add connections
-        if li_settings.get("add_people_by_keywords", False):
-            add_range = li_settings.get("people_add_range", [1, 3])
-            remaining_adds = min(
-                random.randint(add_range[0], add_range[1]),
-                DAILY_LIMITS["linkedin_adds"] - stats.get("linkedin_adds", 0)
-            )
-            
-            add_keywords = li_settings.get("add_people_keywords", keywords)
-            
-            for _ in range(remaining_adds):
-                if _playwright:
-                    try:
-                        result = await linkedin.add_connection(_playwright, user_id, add_keywords)
-                        if result:
-                            storage.increment_stat(user_id, "linkedin_adds")
-                        await asyncio.sleep(random.uniform(*DELAYS["connection"]))
-                    except Exception as e:
-                        logger.error(f"Error adding connection: {e}")
+        liked_urls = {q.get("post_url") for q in storage.get_queue(user_id) if q.get("action") == "like"}
+        like_candidates = [p for p in posts if p.get("url") and p["url"] not in liked_urls]
+
+        for post in like_candidates[:remaining_likes]:
+            try:
+                like_item = {
+                    "id": str(uuid.uuid4()),
+                    "platform": "linkedin",
+                    "action": "like",
+                    "post_id": post.get("id", ""),
+                    "post_url": post.get("url", ""),
+                    "post_excerpt": post.get("excerpt", post.get("text", "")[:200]),
+                    "post_text": post.get("text", ""),
+                    "comment": "",
+                    "status": "pending",
+                    "author": post.get("author", "") or post.get("author_name", ""),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                storage.add_to_queue(user_id, like_item)
+                if _send_queue_item:
+                    await _send_queue_item(user_id, like_item)
+                await asyncio.sleep(random.uniform(2, 5))
+            except Exception as e:
+                logger.error("Error queueing LinkedIn like: %s", e)
         
         logger.info(f"LinkedIn session completed for user {user_id}")
         
@@ -276,8 +311,9 @@ async def run_reddit_session(user_id: str):
     rd_settings = settings.get("reddit", {})
     
     try:
-        # Scrape posts
-        posts = reddit_bot.scrape_posts(user_id)
+        posts = reddit_public.scrape_posts(user_id, max_posts=rd_settings.get("comments_per_day", 5) * 3)
+        if not posts and reddit_bot.has_posting_credentials(user_id):
+            posts = reddit_bot.scrape_posts(user_id)
         
         # Calculate remaining comments
         remaining_comments = min(
@@ -293,15 +329,16 @@ async def run_reddit_session(user_id: str):
                 queue_item = {
                     "id": str(uuid.uuid4()),
                     "platform": "reddit",
-                    "post_id": post["id"],
-                    "reddit_id": post.get("reddit_id", ""),
-                    "post_url": post.get("url", ""),
-                    "post_excerpt": post["excerpt"],
-                    "post_text": post["text"],
+                    "action": "comment",
+                    "post_id": post.get("id", post.get("post_id", "")),
+                    "reddit_id": post.get("reddit_id", post.get("post_id", "")),
+                    "post_url": post.get("url") or post.get("link", ""),
+                    "post_excerpt": post.get("excerpt", post.get("text", "")[:200]),
+                    "post_text": post.get("text", ""),
                     "comment": comment,
                     "status": "pending",
                     "author": post.get("author", ""),
-                    "subreddit": post.get("subreddit", ""),
+                    "subreddit": post.get("subreddit", post.get("sub", "")),
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 }
                 
@@ -316,20 +353,40 @@ async def run_reddit_session(user_id: str):
                 logger.error(f"Error generating Reddit comment: {e}")
                 continue
         
-        # Upvote posts
         remaining_upvotes = min(
             rd_settings.get("upvotes_per_day", 5),
-            DAILY_LIMITS["reddit_upvotes"] - stats.get("reddit_upvotes", 0)
+            DAILY_LIMITS["reddit_upvotes"] - stats.get("reddit_upvotes", 0),
         )
-        
+        upvote_ids = {
+            q.get("reddit_id") for q in storage.get_queue(user_id) if q.get("action") == "upvote"
+        }
+
         for post in posts[:remaining_upvotes]:
+            rid = post.get("reddit_id", post.get("post_id", ""))
+            if not rid or rid in upvote_ids:
+                continue
             try:
-                success = reddit_bot.upvote_post(user_id, post.get("reddit_id", ""))
-                if success:
-                    storage.increment_stat(user_id, "reddit_upvotes")
-                await asyncio.sleep(random.uniform(*DELAYS["like"]))
+                upvote_item = {
+                    "id": str(uuid.uuid4()),
+                    "platform": "reddit",
+                    "action": "upvote",
+                    "post_id": post.get("id", f"rd_{rid}"),
+                    "reddit_id": rid,
+                    "post_url": post.get("url") or post.get("link", ""),
+                    "post_excerpt": post.get("excerpt", post.get("text", "")[:200]),
+                    "post_text": post.get("text", ""),
+                    "comment": "",
+                    "status": "pending",
+                    "author": post.get("author", ""),
+                    "subreddit": post.get("subreddit", post.get("sub", "")),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                storage.add_to_queue(user_id, upvote_item)
+                if _send_queue_item:
+                    await _send_queue_item(user_id, upvote_item)
+                await asyncio.sleep(random.uniform(2, 5))
             except Exception as e:
-                logger.error(f"Error upvoting Reddit post: {e}")
+                logger.error("Error queueing Reddit upvote: %s", e)
         
         logger.info(f"Reddit session completed for user {user_id}")
         

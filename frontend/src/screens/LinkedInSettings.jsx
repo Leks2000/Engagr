@@ -176,6 +176,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     setDisconnecting(true)
     try {
       await api.post(`/api/linkedin/disconnect/${uid}`)
+      setStatus(false)
       setProfile(null)
       setProxyHealth(null)
       onSettingsUpdate({
@@ -253,17 +254,6 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
     return () => clearTimeout(saveTimerRef.current)
   }, [keywords, commentsPerDay, dailyHardLimit, tone, jitterRange, warmupMode, ctaTemplates, addRange, addByKeywords, addKeywords, sessionTimes])
 
-  useEffect(() => {
-    const loadProxyHealth = async () => {
-      if (!status) return
-      try {
-        const data = await api.get(`/api/linkedin/proxy-health/${uid}`)
-        setProxyHealth(data)
-      } catch {}
-    }
-    loadProxyHealth()
-  }, [status, uid])
-
   return (
     <div className="px-5 pt-6 animate-fade-in">
       {authUrl && authUrl !== 'callback' && (
@@ -301,41 +291,18 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
       {/* Account Section */}
       <Section title="Account" subtitle={status ? 'Session active' : 'Connect your LinkedIn account'}>
         {status ? (
-          <div className="card flex items-center justify-between py-3">
-            <div className="flex items-center gap-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
-                <rect x="2" y="9" width="4" height="12" />
-                <circle cx="4" cy="4" r="2" />
-              </svg>
-              <div>
+          <div className="card">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0077B5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+                  <rect x="2" y="9" width="4" height="12" />
+                  <circle cx="4" cy="4" r="2" />
+                </svg>
                 <span className="text-sm font-medium">LinkedIn Connected</span>
-                {proxyHealth?.ok && (
-                  <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>
-                    Proxy health: {proxyHealth.latency_ms}ms · IP Trust {proxyHealth.trust_score}% ({proxyHealth.status})
-                  </p>
-                )}
-                {profileLoading ? (
-                  <p className="text-xs" style={{ color: "var(--color-muted)" }}>Loading profile...</p>
-                ) : profile ? (
-                  <div className="mt-2 flex items-center gap-3">
-                    {profile.picture_url ? (
-                      <img src={profile.picture_url} alt={profile.name || "LinkedIn"} className="w-10 h-10 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "#e3f2fd", color: "#0A66C2" }}>
-                        {(profile.name || "LI").split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-sm font-bold">{profile.name || "LinkedIn User"}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>{profile.headline || ""}</p>
-                      <p className="text-[11px]" style={{ color: "var(--color-muted)" }}>{profile.email || ""}</p>
-                    </div>
-                  </div>
-                ) : null}
               </div>
               <button
-                className="text-xs px-3 py-1.5 rounded-lg"
+                className="text-xs px-3 py-1.5 rounded-lg flex-shrink-0"
                 style={{ color: 'var(--color-danger)', background: '#fce4ec' }}
                 onClick={handleDisconnect}
                 disabled={disconnecting}
@@ -343,25 +310,32 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                 {disconnecting ? 'Disconnecting...' : 'Disconnect'}
               </button>
             </div>
-            {/* Profile card */}
+            {proxyHealth?.ok && (
+              <p className="text-[11px] mb-3" style={{ color: 'var(--color-muted)' }}>
+                Proxy: {proxyHealth.latency_ms}ms · Trust {proxyHealth.trust_score}% ({proxyHealth.status})
+              </p>
+            )}
             {profileLoading ? (
-              <p className="text-xs mt-2" style={{ color: 'var(--color-muted)' }}>Loading profile...</p>
+              <p className="text-xs" style={{ color: 'var(--color-muted)' }}>Loading profile...</p>
             ) : profile ? (
-              <div className="mt-3 flex items-center gap-3 p-3 rounded-xl" style={{ background: '#f0f7ff', border: '1px solid #bfdbfe' }}>
+              <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: '#f0f7ff', border: '1px solid #bfdbfe' }}>
                 {profile.picture_url ? (
-                  <img src={profile.picture_url} alt={profile.name || 'LinkedIn'} className="w-10 h-10 rounded-full object-cover" />
+                  <img src={profile.picture_url} alt={profile.name || 'LinkedIn'} className="w-11 h-11 rounded-full object-cover" />
                 ) : (
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: '#0A66C2', color: 'white' }}>
+                  <div className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: '#0A66C2', color: 'white' }}>
                     {(profile.name || 'LI').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
                 )}
-                <div>
-                  <p className="text-sm font-bold">{profile.name || 'LinkedIn User'}</p>
-                  {profile.headline && <p className="text-xs" style={{ color: 'var(--color-muted)' }}>{profile.headline}</p>}
-                  {profile.email && <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>{profile.email}</p>}
+                <div className="min-w-0">
+                  <p className="text-sm font-bold truncate">{profile.name || 'LinkedIn User'}</p>
+                  {profile.headline && <p className="text-xs line-clamp-2" style={{ color: 'var(--color-muted)' }}>{profile.headline}</p>}
+                  {profile.email && <p className="text-[11px] truncate" style={{ color: 'var(--color-muted)' }}>{profile.email}</p>}
                 </div>
               </div>
             ) : null}
+            <p className="text-[11px] mt-3" style={{ color: 'var(--color-muted)' }}>
+              For feed discovery by keywords, use li_at cookie (OAuth shows mostly your own posts).
+            </p>
           </div>
         ) : (
           <div className="card">

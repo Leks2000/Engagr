@@ -19,8 +19,8 @@ from telegram.ext import (
 from config import TELEGRAM_BOT_TOKEN, MINI_APP_URL, DELAYS, DAILY_LIMITS
 import storage
 import ai_comment
-import linkedin
-import reddit_bot
+import daily_digest
+import queue_executor
 import scheduler as sched_module
 
 logger = logging.getLogger(__name__)
@@ -125,10 +125,11 @@ async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔗 *LinkedIn Setup*\n\n"
-        "To connect LinkedIn, run the setup script on your server:\n"
-        "```\npython backend/setup.py\n```\n\n"
-        "This opens a browser window where you log in to LinkedIn.\n"
-        "Cookies are saved automatically for future sessions.",
+        "1. Open Mini App → Settings → LinkedIn\n"
+        "2. Paste your `li_at` cookie (DevTools → Application → Cookies)\n"
+        "3. Add keywords and session times\n"
+        "4. Approve comments/likes in this chat when the bot sends them\n\n"
+        "OAuth alone finds only your own posts — use `li_at` for feed discovery.",
         parse_mode="Markdown",
     )
 
@@ -136,12 +137,11 @@ async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_reddit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 *Reddit Setup*\n\n"
-        "Connect your Reddit account via OAuth:\n\n"
-        "1. Open the Mini App (Settings → Reddit)\n"
-        "2. Click *Connect via Reddit OAuth*\n"
-        "3. Authorize Engagr in the popup\n"
-        "4. Done! No passwords needed ✅\n\n"
-        "💡 Your account is connected securely using OAuth tokens.",
+        "Discovery works *without* a Reddit app:\n"
+        "1. Mini App → Reddit → add subreddits & keywords\n"
+        "2. Enable discovery — bot parses public feeds\n"
+        "3. Approve comments in this chat\n\n"
+        "Optional: Reddit username/password in settings for auto-posting.",
         parse_mode="Markdown",
     )
 
@@ -225,19 +225,39 @@ async def cmd_connections(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Queue Card (Telegram Approval Flow) ──────────────
 
-async def _send_queue_card(chat_id, item: dict, context: ContextTypes.DEFAULT_TYPE):
-    """Send a queue item as a formatted card with action buttons."""
-    platform = item.get("platform", "").upper()
-    platform_badge = "📍 LINKEDIN" if platform == "LINKEDIN" else "📍 REDDIT"
-    
-    text = (
+def _queue_card_text(item: dict) -> str:
+    platform = item.get("platform", "linkedin")
+    platform_badge = "📍 LINKEDIN" if platform == "linkedin" else "📍 REDDIT"
+    action = item.get("action", "comment")
+
+    if action == "like":
+        return f"{platform_badge} — 👍 *Like this post?*\n\n📝 {item.get('post_excerpt', '')[:200]}"
+    if action == "upvote":
+        sub = item.get("subreddit", "")
+        return f"{platform_badge} — ⬆️ *Upvote r/{sub}?*\n\n📝 {item.get('post_excerpt', '')[:200]}"
+    if action == "connect":
+        return f"{platform_badge} — 🤝 *Send connection request?*"
+
+    return (
         f"{platform_badge}\n"
         f"📝 {item.get('post_excerpt', '')[:200]}\n\n"
         f"💬 {item.get('comment', '')}\n"
     )
-    
+
+
+def _queue_card_keyboard(item: dict) -> InlineKeyboardMarkup:
     item_id = item.get("id", "")
-    keyboard = InlineKeyboardMarkup([
+    action = item.get("action", "comment")
+    post_url = item.get("post_url", "")
+
+    if action in ("like", "upvote", "connect"):
+        row1 = [InlineKeyboardButton("✅ Approve", callback_data=f"approve_{item_id}")]
+        row2 = [InlineKeyboardButton("❌ Skip", callback_data=f"skip_{item_id}")]
+        if post_url:
+            row1.append(InlineKeyboardButton("🔗 Open", url=post_url))
+        return InlineKeyboardMarkup([row1, row2])
+
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Post", callback_data=f"approve_{item_id}"),
             InlineKeyboardButton("✏️ Edit", callback_data=f"edit_{item_id}"),
@@ -247,8 +267,16 @@ async def _send_queue_card(chat_id, item: dict, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton("🔄 Regenerate", callback_data=f"regen_{item_id}"),
         ],
     ])
-    
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+
+
+async def _send_queue_card(chat_id, item: dict, context: ContextTypes.DEFAULT_TYPE):
+    """Send a queue item as a formatted card with action buttons."""
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=_queue_card_text(item),
+        reply_markup=_queue_card_keyboard(item),
+        parse_mode="Markdown",
+    )
 
 
 # ── Callback Handler (Button Presses) ────────────────
@@ -268,6 +296,49 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         status = "▶️ Sessions resumed!" if new_state else "⏸ Sessions paused."
         await query.edit_message_text(status)
+        return
+
+    if data.startswith("digest_copy_"):
+        try:
+            idx = int(data.rsplit("_", 1)[-1]) - 1
+            items = daily_digest.get_last_digest(user_id)
+            if 0 <= idx < len(items):
+                await query.answer("Comment copied below")
+                await context.bot.send_message(
+                    chat_id=int(user_id),
+                    text=f"📋 `{items[idx].get('selected_comment', '')}`",
+                    parse_mode="Markdown",
+                )
+            else:
+                await query.answer("Run /digest to refresh")
+        except Exception:
+            await query.answer("Could not copy")
+        return
+
+    if data.startswith("digest_regen_"):
+        try:
+            idx = int(data.rsplit("_", 1)[-1]) - 1
+            items = daily_digest.get_last_digest(user_id)
+            if 0 <= idx < len(items):
+                item = items[idx]
+                settings = storage.get_settings(user_id)
+                lang = settings.get("language", "en")
+                tone = settings.get("linkedin", {}).get("tone", "friendly")
+                new = ai_comment.regenerate_comment(
+                    item.get("title", ""),
+                    item.get("selected_comment", ""),
+                    item.get("platform", "linkedin"),
+                )
+                item["selected_comment"] = new
+                daily_digest.set_last_digest_item(user_id, idx, item)
+                await query.edit_message_text(
+                    f"🔄 *Regenerated:*\n\n`{new}`",
+                    parse_mode="Markdown",
+                )
+            else:
+                await query.answer("Run /digest to refresh")
+        except Exception as e:
+            await query.answer(f"Failed: {str(e)[:80]}")
         return
     
     # Parse action_itemId
@@ -294,44 +365,35 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         storage.remove_from_queue(user_id, item_id)
         await query.edit_message_text("❌ Comment skipped.")
     elif action == "regen":
+        if item.get("action", "comment") != "comment":
+            await query.edit_message_text("Regenerate is only available for comments.")
+            return
         await _regenerate_item(user_id, item, query, context)
 
 
 async def _approve_item(user_id: str, item: dict, query, context):
-    """Approve and schedule posting of a comment."""
-    platform = item.get("platform", "")
-    
-    # Random delay before posting
-    delay = random.uniform(*DELAYS["comment"])
+    """Approve and schedule posting after a random delay."""
+    action = item.get("action", "comment")
+    delay_key = "like" if action in ("like", "upvote") else "comment"
+    delay = random.uniform(*DELAYS[delay_key])
+
+    preview = item.get("comment", "") if action == "comment" else f"Action: {action}"
     await query.edit_message_text(
-        f"✅ Approved! Will post in ~{int(delay/60)} minutes.\n\n"
-        f"💬 {item.get('comment', '')}"
+        f"✅ Approved! Will run in ~{max(1, int(delay / 60))} min.\n\n{preview[:300]}"
     )
-    
-    # Schedule the actual posting
+
     await asyncio.sleep(delay)
-    
-    success = False
-    if platform == "linkedin":
-        pw = sched_module._playwright
-        if pw and item.get("post_url"):
-            success = await linkedin.post_comment(pw, item["post_url"], item["comment"])
-        if success:
-            storage.increment_stat(user_id, "linkedin_comments")
-    elif platform == "reddit":
-        reddit_id = item.get("reddit_id", "")
-        if reddit_id:
-            success = reddit_bot.post_comment(user_id, reddit_id, item["comment"])
-        if success:
-            storage.increment_stat(user_id, "reddit_comments")
-    
+
+    success, status = await queue_executor.execute_queue_item(user_id, item)
     storage.remove_from_queue(user_id, item["id"])
-    
-    status = "✅ Comment posted!" if success else "❌ Failed to post comment."
+
     try:
-        await context.bot.send_message(chat_id=int(user_id), text=status)
+        await context.bot.send_message(
+            chat_id=int(user_id),
+            text=f"{'✅' if success else '⚠️'} {status}",
+        )
     except Exception as e:
-        logger.error(f"Error sending post status: {e}")
+        logger.error("Error sending post status: %s", e)
 
 
 async def _regenerate_item(user_id: str, item: dict, query, context):
@@ -345,28 +407,10 @@ async def _regenerate_item(user_id: str, item: dict, query, context):
         
         storage.update_queue_item(user_id, item["id"], {"comment": new_comment})
         item["comment"] = new_comment
-        
-        platform_badge = "📍 LINKEDIN" if item.get("platform") == "linkedin" else "📍 REDDIT"
-        text = (
-            f"🔄 *Regenerated comment:*\n\n"
-            f"{platform_badge}\n"
-            f"📝 {item.get('post_excerpt', '')[:200]}\n\n"
-            f"💬 {new_comment}\n"
+        text = f"🔄 *Regenerated comment:*\n\n{_queue_card_text(item)}"
+        await query.edit_message_text(
+            text, parse_mode="Markdown", reply_markup=_queue_card_keyboard(item)
         )
-        
-        item_id = item.get("id", "")
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Post", callback_data=f"approve_{item_id}"),
-                InlineKeyboardButton("✏️ Edit", callback_data=f"edit_{item_id}"),
-            ],
-            [
-                InlineKeyboardButton("❌ Skip", callback_data=f"skip_{item_id}"),
-                InlineKeyboardButton("🔄 Regenerate", callback_data=f"regen_{item_id}"),
-            ],
-        ])
-        
-        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
         
     except Exception as e:
         await query.edit_message_text(f"❌ Regeneration failed: {str(e)[:200]}")
@@ -442,26 +486,12 @@ async def send_queue_item_to_user(user_id: str, item: dict):
             )
             return
         
-        platform_badge = "LINKEDIN" if item.get("platform") == "linkedin" else "REDDIT"
-        text = (
-            f"📍 {platform_badge}\n"
-            f"📝 {item.get('post_excerpt', '')[:200]}\n\n"
-            f"💬 {item.get('comment', '')}\n"
+        await app.bot.send_message(
+            chat_id=int(user_id),
+            text=_queue_card_text(item),
+            reply_markup=_queue_card_keyboard(item),
+            parse_mode="Markdown",
         )
-        
-        item_id = item.get("id", "")
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Post", callback_data=f"approve_{item_id}"),
-                InlineKeyboardButton("✏️ Edit", callback_data=f"edit_{item_id}"),
-            ],
-            [
-                InlineKeyboardButton("❌ Skip", callback_data=f"skip_{item_id}"),
-                InlineKeyboardButton("🔄 Regenerate", callback_data=f"regen_{item_id}"),
-            ],
-        ])
-        
-        await app.bot.send_message(chat_id=int(user_id), text=text, reply_markup=keyboard)
         
     except Exception as e:
         logger.error(f"Error sending queue item to user {user_id}: {e}")
@@ -498,7 +528,7 @@ def create_bot() -> Application:
     
     _bot_app = app
     
-    # Set scheduler callback
     sched_module.set_send_callback(send_queue_item_to_user)
-    
+    daily_digest.set_send_callback(send_queue_item_to_user)
+
     return app

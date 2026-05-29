@@ -1,21 +1,22 @@
-"""Engagr — Reddit automation via asyncpraw (no browser automation)."""
+"""Engagr — Reddit posting via asyncpraw (optional; discovery uses reddit_public)."""
 
 import asyncio
 import json
 import logging
-from pathlib import Path
 
 import asyncpraw
 from asyncprawcore import Forbidden, OAuthException, ResponseException
 
-from config import DATA_DIR
+from config import reddit_cookies_path
 import storage
 
 logger = logging.getLogger(__name__)
 
 
-def _creds_path(user_id: str) -> Path:
-    return DATA_DIR / str(user_id) / "reddit_credentials.json"
+def _creds_path(user_id: str):
+    from config import DATA_DIR
+    from pathlib import Path
+    return Path(DATA_DIR) / str(user_id) / "reddit_credentials.json"
 
 
 def _save_credentials(user_id: str, username: str, password: str):
@@ -36,9 +37,38 @@ def _load_credentials(user_id: str) -> dict | None:
         return None
     return None
 
+
 def save_cookies(user_id: str, reddit_session: str, token_v2: str):
-    p = reddit_cookies_path(user_id); p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"reddit_session": reddit_session, "token_v2": token_v2}, indent=2), encoding="utf-8")
+    path = reddit_cookies_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"reddit_session": reddit_session, "token_v2": token_v2}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_cookies(user_id: str) -> dict:
+    path = reddit_cookies_path(user_id)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def has_posting_credentials(user_id: str) -> bool:
+    return bool(_load_credentials(user_id))
+
+
+def verify_cookie_login(user_id: str, reddit_session: str, token_v2: str) -> tuple[bool, str]:
+    """Save browser cookies for future posting; marks user as connected."""
+    if not reddit_session or not token_v2:
+        return False, ""
+    save_cookies(user_id, reddit_session, token_v2)
+    # Cookie-based HTTP posting can be added later; discovery does not need it.
+    return True, "reddit_cookie"
+
 
 async def _build_client(user_id: str):
     creds = _load_credentials(user_id)
@@ -53,21 +83,11 @@ async def _build_client(user_id: str):
         check_for_async=False,
     )
 
-def _load_credentials(user_id: str) -> dict:
-    p = _creds_path(user_id)
-    if not p.exists(): return {}
-    try: return json.loads(p.read_text(encoding="utf-8"))
-    except Exception: return {}
 
 async def _verify_client(client):
     me = await client.user.me()
     return me.name if me else ""
 
-def _load_cookies(user_id: str) -> dict:
-    p = reddit_cookies_path(user_id)
-    if not p.exists(): return {}
-    try: return json.loads(p.read_text(encoding="utf-8"))
-    except Exception: return {}
 
 def check_login(user_id: str) -> bool:
     async def _inner():
@@ -81,11 +101,11 @@ def check_login(user_id: str) -> bool:
             return False
         finally:
             await client.close()
+
     return asyncio.run(_inner())
 
 
 def login_with_playwright(user_id: str, username: str, password: str) -> tuple[bool, str]:
-    """Backward-compatible function name; uses asyncpraw credentials login."""
     async def _inner():
         client = asyncpraw.Reddit(
             client_id="",
@@ -182,6 +202,7 @@ def post_comment(user_id: str, reddit_id: str, comment: str) -> bool:
             return False
         finally:
             await client.close()
+
     return asyncio.run(_inner())
 
 
