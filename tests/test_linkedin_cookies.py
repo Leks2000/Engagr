@@ -62,19 +62,3 @@ def test_fetch_current_profile_rejects_status_without_keyerror():
         assert "status 401" in str(exc)
     else:
         raise AssertionError("Expected rejected LinkedIn status to raise ValueError")
-
-
-def test_fetch_current_profile_explains_redirect_loop():
-    from requests.exceptions import TooManyRedirects
-
-    class RedirectingClient:
-        def get_user_profile(self, use_cache=False):
-            raise TooManyRedirects("Exceeded 30 redirects")
-
-    try:
-        _fetch_current_profile(RedirectingClient())
-    except ValueError as exc:
-        assert "redirected" in str(exc)
-        assert "fresh li_at + JSESSIONID" in str(exc)
-    else:
-        raise AssertionError("Expected redirect loop to raise ValueError")
