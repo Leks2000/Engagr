@@ -682,10 +682,16 @@ def run_session_now(user_id):
             "run_session_now user=%s auth_method=%s has_li_at=%s has_access_token=%s",
             user_id, auth.get("auth_method", ""), bool(auth.get("li_at")), bool(auth.get("access_token")),
         )
+        has_li_at = bool(auth.get("li_at"))
         linkedin.ensure_client(user_id)
+        if not linkedin._clients.get(user_id) and not has_li_at:
+            sched_module._log(
+                user_id,
+                "⚠️ No li_at cookie — feed scrape unavailable. Mini App → LinkedIn → Paste li_at.",
+            )
         posts = asyncio.run(linkedin.scrape_posts(None, keywords, max_posts=max_posts, user_id=user_id))
-        if not posts and auth.get("access_token"):
-            sched_module._log(user_id, "⚠️ Feed scrape empty. Trying OAuth (own posts only)...")
+        if not posts and auth.get("access_token") and not has_li_at:
+            sched_module._log(user_id, "⚠️ Trying OAuth (usually only your own posts)...")
             posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
 

@@ -41,25 +41,34 @@ async def generate_daily_digest(user_id: str) -> list[dict]:
     tone = li_cfg.get("tone", "friendly")
     
     digest_items = []
-    
-    # Get trending news as post candidates
+
     try:
-        news = news_grounding.get_trending_news(keywords[:5], limit=10)
-        for item in news[:5]:
+        news = news_grounding.get_trending_news(keywords[:5] if keywords else None, limit=10)
+        for item in news[:8]:
             digest_items.append({
                 "source": item.get("source", ""),
                 "title": item.get("title", ""),
                 "url": item.get("url", ""),
                 "score": item.get("score", 0),
-                "platform": "linkedin",
+                "platform": "news",
                 "text": item.get("title", ""),
             })
     except Exception as e:
         logger.error("Failed to fetch news for digest: %s", e)
-    
-    # Score and filter by humanness
-    if digest_items:
-        digest_items = humanness_scorer.filter_human_posts(digest_items, threshold=0.4)
+
+    try:
+        import reddit_public
+        for post in reddit_public.scrape_posts(user_id, max_posts=5):
+            digest_items.append({
+                "source": f"r/{post.get('subreddit', post.get('sub', ''))}",
+                "title": (post.get("title") or post.get("text", ""))[:200],
+                "url": post.get("url") or post.get("link", ""),
+                "score": post.get("score", 0),
+                "platform": "reddit",
+                "text": post.get("text", post.get("title", "")),
+            })
+    except Exception as e:
+        logger.error("Reddit digest fetch failed user=%s: %s", user_id, e)
     
     # Sort by engagement potential (score)
     digest_items.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -72,7 +81,7 @@ async def generate_daily_digest(user_id: str) -> list[dict]:
     for item in top_items:
         try:
             comment_data = ai_comment.generate_comment_variants(
-                item["text"], language, item.get("platform", "linkedin"), tone=tone, keywords=keywords[:3]
+                item["text"], language, item.get("platform", "linkedin"), tone=tone
             )
             variants = comment_data.get("variants", ["Great insight!"])
             
@@ -106,6 +115,10 @@ async def send_daily_digest(user_id: str):
         
         if not items:
             logger.info("No digest items for user %s", user_id)
+            await _send_callback(user_id, {
+                "type": "error",
+                "message": "📰 Digest empty — no news/Reddit matches. Check GROQ_API_KEY or add subreddits.",
+            })
             return
         
         settings = storage.get_settings(user_id)
@@ -139,11 +152,16 @@ async def send_daily_digest(user_id: str):
                 "comment_variants": item["comment_variants"],
             })
         
-        _last_digest[user_id] = result
+        _last_digest[user_id] = items
         logger.info("Daily digest sent to user %s (%d items)", user_id, len(items))
 
     except Exception as e:
         logger.error("Failed to send daily digest to user %s: %s", user_id, e)
+        if _send_callback:
+            await _send_callback(user_id, {
+                "type": "error",
+                "message": f"❌ Digest failed: {str(e)[:200]}",
+            })
 
 
 def get_last_digest(user_id: str) -> list[dict]:

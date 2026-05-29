@@ -197,7 +197,12 @@ async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     import daily_digest as dd
     dd.set_send_callback(send_queue_item_to_user)
-    await dd.send_daily_digest(user_id)
+    await update.message.reply_text("📰 Generating digest…")
+    try:
+        await dd.send_daily_digest(user_id)
+    except Exception as e:
+        logger.error("cmd_digest failed user=%s: %s", user_id, e)
+        await update.message.reply_text(f"❌ Digest error: {str(e)[:200]}")
 
 
 async def cmd_connections(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -331,9 +336,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 item["selected_comment"] = new
                 daily_digest.set_last_digest_item(user_id, idx, item)
+                import html as html_module
                 await query.edit_message_text(
-                    f"🔄 *Regenerated:*\n\n`{new}`",
-                    parse_mode="Markdown",
+                    f"🔄 Regenerated:\n\n<code>{html_module.escape(new)}</code>",
+                    parse_mode="HTML",
                 )
             else:
                 await query.answer("Run /digest to refresh")
@@ -463,24 +469,28 @@ async def send_queue_item_to_user(user_id: str, item: dict):
             return
         
         if item.get("type") == "digest_item":
-            # Daily digest item with copy-to-clipboard action
+            import html as html_module
             idx = item.get("index", 0)
+            title = html_module.escape(item.get("title", "")[:200])
+            source = html_module.escape(item.get("source", ""))
+            comment = html_module.escape(item.get("comment", ""))
+            url = item.get("url", "https://linkedin.com")
             text = (
-                f"*{idx}. {item.get('title', '')}*\n"
-                f"_{item.get('source', '')}_ | [Open Link]({item.get('url', '')})\n\n"
-                f"💬 Suggested comment:\n`{item.get('comment', '')}`\n"
+                f"<b>{idx}. {title}</b>\n"
+                f"<i>{source}</i> · <a href=\"{url}\">Open</a>\n\n"
+                f"💬 Suggested comment:\n<code>{comment}</code>"
             )
             keyboard = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("📋 Copy Comment", callback_data=f"digest_copy_{idx}"),
-                    InlineKeyboardButton("🔗 Open Post", url=item.get("url", "https://linkedin.com")),
+                    InlineKeyboardButton("🔗 Open Post", url=url),
                 ],
                 [InlineKeyboardButton("🔄 Regenerate", callback_data=f"digest_regen_{idx}")],
             ])
             await app.bot.send_message(
                 chat_id=int(user_id),
                 text=text,
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=keyboard,
                 disable_web_page_preview=True,
             )

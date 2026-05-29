@@ -147,12 +147,18 @@ def get_trending_news(keywords: list[str] = None, limit: int = 5) -> list[dict]:
     all_items.extend(fetch_producthunt_top(10))
 
     if keywords:
-        # Score items by keyword relevance
-        kw_lower = [k.lower() for k in keywords]
+        kw_lower = [k.lower().strip() for k in keywords if k.strip()]
         scored = []
         for item in all_items:
             title_lower = item["title"].lower()
-            relevance = sum(1 for kw in kw_lower if kw in title_lower)
+            relevance = 0
+            for kw in kw_lower:
+                if kw in title_lower:
+                    relevance += 2
+                else:
+                    for word in kw.split():
+                        if len(word) > 2 and word in title_lower:
+                            relevance += 1
             if relevance > 0:
                 scored.append((relevance + item.get("score", 0) / 1000, item))
 
@@ -160,7 +166,9 @@ def get_trending_news(keywords: list[str] = None, limit: int = 5) -> list[dict]:
         if scored:
             return [item for _, item in scored[:limit]]
 
-    # If no keyword match, return top by score
+    if not all_items:
+        return []
+
     all_items.sort(key=lambda x: x.get("score", 0), reverse=True)
     return all_items[:limit]
 

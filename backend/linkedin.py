@@ -94,6 +94,103 @@ def _post_url_from_urn(activity_urn: str) -> str:
     return f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_urn}/"
 
 
+def _keyword_matches(text: str, keywords: list[str]) -> bool:
+    """Flexible keyword match: full phrase or any significant word."""
+    if not keywords:
+        return True
+    lower = text.lower()
+    for kw in keywords:
+        k = kw.strip().lower()
+        if not k:
+            continue
+        if k in lower:
+            return True
+        for word in k.split():
+            if len(word) > 2 and word in lower:
+                return True
+    return False
+
+
+def _normalize_feed_post(item: dict) -> dict | None:
+    urn = item.get("urn_id") or item.get("urn") or ""
+    activity_urn = re.sub(r"\D", "", str(urn)) if urn else ""
+    commentary = item.get("commentary") or {}
+    text = (commentary.get("text") or {}).get("text") or item.get("text") or ""
+    if not text or not activity_urn:
+        return None
+    actor = item.get("actor") or {}
+    author = ""
+    if isinstance(actor, dict):
+        name = actor.get("name") or {}
+        if isinstance(name, dict):
+            author = name.get("text", "") or ""
+        elif isinstance(name, str):
+            author = name
+    reactions = 0
+    sd = item.get("socialDetail") or {}
+    counts = sd.get("totalSocialActivityCounts") or {}
+    reactions = counts.get("numLikes", 0) or 0
+    return {
+        "id": f"li_{activity_urn}",
+        "text": text[:1000],
+        "url": _post_url_from_urn(activity_urn),
+        "author": author,
+        "author_name": author,
+        "reactions": reactions,
+        "reactions_count": reactions,
+        "excerpt": text[:200],
+        "platform": "linkedin",
+    }
+
+
+def _scrape_via_search(client: Linkedin, keywords: list[str], max_posts: int) -> list[dict]:
+    """Fallback: LinkedIn global search for posts by keywords."""
+    if not keywords:
+        return []
+    query = " ".join(k.strip() for k in keywords[:3] if k.strip())
+    if not query:
+        return []
+    posts = []
+    try:
+        results = client.search(
+            {
+                "keywords": query,
+                "origin": "GLOBAL_SEARCH_HEADER",
+            },
+            limit=max(20, max_posts * 3),
+        )
+        for hit in results or []:
+            if not isinstance(hit, dict):
+                continue
+            text = hit.get("headline", "") or hit.get("summary", "") or hit.get("title", "") or ""
+            if isinstance(text, dict):
+                text = text.get("text", "") or ""
+            if not text:
+                continue
+            url = hit.get("url", "") or hit.get("navigationUrl", "") or ""
+            if not url and hit.get("entityUrn"):
+                urn = re.sub(r"\D", "", str(hit.get("entityUrn", "")))
+                if urn:
+                    url = _post_url_from_urn(urn)
+            pid = re.sub(r"\D", "", str(hit.get("entityUrn", hit.get("trackingUrn", "")))) or str(len(posts))
+            posts.append({
+                "id": f"li_search_{pid}",
+                "text": str(text)[:1000],
+                "url": url or f"https://www.linkedin.com/search/results/content/?keywords={query}",
+                "author": hit.get("title", "") if isinstance(hit.get("title"), str) else "",
+                "author_name": "",
+                "reactions": 0,
+                "reactions_count": 0,
+                "excerpt": str(text)[:200],
+                "platform": "linkedin",
+            })
+            if len(posts) >= max_posts:
+                break
+    except Exception as e:
+        logger.warning("LinkedIn search fallback failed: %s", e)
+    return posts[:max_posts]
+
+
 def login_with_playwright(user_id: str, email: str, password: str) -> tuple[bool, str]:
     try:
         client = Linkedin(email, password, proxies=_proxy_dict(user_id))
@@ -136,36 +233,53 @@ async def scrape_posts(_playwright_unused, keywords: list[str], max_posts: int =
         ensure_client(uid)
     client = _clients.get(uid)
     if not client:
+        auth = _load_auth(uid)
+        logger.warning(
+            "LinkedIn scrape skipped user=%s: no li_at client (has_oauth=%s). Paste li_at cookie.",
+            uid,
+            bool(auth.get("access_token")),
+        )
         return []
+
     posts = []
+    feed_raw = 0
     try:
-        feed_items = client.get_feed_posts(limit=max(20, max_posts * 3), exclude_promoted_posts=True)
+        feed_items = client.get_feed_posts(limit=max(30, max_posts * 5), exclude_promoted_posts=True) or []
+        feed_raw = len(feed_items)
+        matched = []
         for item in feed_items:
-            urn = item.get("urn_id") or item.get("urn") or ""
-            activity_urn = re.sub(r"\D", "", str(urn)) if urn else ""
-            commentary = item.get("commentary") or {}
-            text = (commentary.get("text") or {}).get("text") or item.get("text") or ""
-            if not text:
+            norm = _normalize_feed_post(item)
+            if not norm:
                 continue
-            if keywords and not any(k.lower() in text.lower() for k in keywords):
-                continue
-            author = item.get("actor", {}).get("name", {}).get("text") if isinstance(item.get("actor"), dict) else ""
-            reactions = item.get("socialDetail", {}).get("totalSocialActivityCounts", {}).get("numLikes", 0)
-            if activity_urn:
-                posts.append({
-                    "id": f"li_{activity_urn}",
-                    "text": text[:1000],
-                    "url": _post_url_from_urn(activity_urn),
-                    "author": author or "",
-                    "reactions": reactions or 0,
-                    "excerpt": text[:200],
-                    "platform": "linkedin",
-                })
-            if len(posts) >= max_posts:
-                break
+            if _keyword_matches(norm["text"], keywords):
+                matched.append(norm)
+        posts = matched[:max_posts]
+        logger.info(
+            "LinkedIn feed user=%s raw=%s keyword_matches=%s keywords=%r",
+            uid, feed_raw, len(matched), keywords[:5],
+        )
+
+        if not posts and feed_raw > 0 and keywords:
+            logger.info("LinkedIn user=%s: 0 keyword hits in feed; using top feed posts (relaxed)", uid)
+            for item in feed_items:
+                norm = _normalize_feed_post(item)
+                if norm:
+                    posts.append(norm)
+                if len(posts) >= max_posts:
+                    break
+
+        if not posts and keywords:
+            search_posts = _scrape_via_search(client, keywords, max_posts)
+            logger.info("LinkedIn search fallback user=%s found=%s", uid, len(search_posts))
+            posts = search_posts
+
     except Exception as e:
         logger.error("LinkedIn scrape error user=%s: %s", user_id, e)
-        return []
+        if keywords:
+            try:
+                posts = _scrape_via_search(client, keywords, max_posts)
+            except Exception:
+                pass
     return posts[:max_posts]
 
 
