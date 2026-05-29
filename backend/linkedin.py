@@ -81,14 +81,7 @@ def _voyager_error_message(data: dict, status_code: int | None = None) -> str:
 
 def _fetch_current_profile(client: Linkedin) -> dict:
     """Fetch the current account profile using the safer /me endpoint."""
-    try:
-        profile = client.get_user_profile(use_cache=False)
-    except TooManyRedirects as exc:
-        raise ValueError(
-            "LinkedIn redirected the cookie session to login too many times. "
-            "Cookies are expired or were copied from a different browser/IP session; "
-            "refresh linkedin.com and copy fresh li_at + JSESSIONID."
-        ) from exc
+    profile = client.get_user_profile(use_cache=False)
     if not isinstance(profile, dict) or not profile:
         raise ValueError("LinkedIn returned empty profile")
     status = profile.get("status")
