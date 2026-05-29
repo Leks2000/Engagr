@@ -522,7 +522,11 @@ def linkedin_cookie():
     message = err or "LinkedIn rejected these cookies. Copy fresh li_at + JSESSIONID from linkedin.com."
     logger.warning("LinkedIn cookie login failed user=%s: %s", user_id, message)
     sched_module.add_session_log(user_id, f"LinkedIn cookie login failed: {message}")
-    return jsonify({"connected": False, "error": message}), 400
+    return jsonify({
+        "connected": False,
+        "error": message,
+        "error_code": _linkedin_cookie_error_code(message),
+    }), 400
 
 
 @api.route("/api/linkedin/check/<user_id>", methods=["GET"])
