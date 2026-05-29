@@ -24,3 +24,8 @@ def test_verify_requires_jsessionid():
     ok, err = verify_li_at("u1", "some_li_at", "")
     assert ok is False
     assert "JSESSIONID" in err
+
+
+def test_clean_cookie_extracts_name_value_fragment():
+    assert _clean_cookie_value('JSESSIONID="ajax:123"; Path=/', "JSESSIONID") == "ajax:123"
+    assert _clean_cookie_value("li_at=AQED123; bcookie=ignored", "li_at") == "AQED123"

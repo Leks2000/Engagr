@@ -503,9 +503,13 @@ def linkedin_cookie():
     ok, err = linkedin.verify_li_at(user_id, li_at, jsessionid)
     if ok:
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
+        sched_module.add_session_log(user_id, "LinkedIn cookie login OK")
         sched_module.schedule_user_sessions(user_id)
         return jsonify({"connected": True})
-    return jsonify({"connected": False, "error": err or "invalid_cookie"}), 400
+    message = err or "LinkedIn rejected these cookies. Copy fresh li_at + JSESSIONID from linkedin.com."
+    logger.warning("LinkedIn cookie login failed user=%s: %s", user_id, message)
+    sched_module.add_session_log(user_id, f"LinkedIn cookie login failed: {message}")
+    return jsonify({"connected": False, "error": message}), 400
 
 
 @api.route("/api/linkedin/check/<user_id>", methods=["GET"])
