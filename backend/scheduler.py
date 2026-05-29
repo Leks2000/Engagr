@@ -47,6 +47,11 @@ def _log(user_id: str, message: str):
     if len(logs) > 200:
         del logs[:-200]
 
+def add_session_log(user_id: str, message: str):
+    """Add a user-visible diagnostic line to the session log."""
+    _log(user_id, message)
+
+
 def get_session_logs(user_id: str) -> list[str]:
     return _session_logs.get(user_id, [])
 
