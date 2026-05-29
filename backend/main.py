@@ -50,6 +50,19 @@ LINKEDIN_PROXY_POOL = [
 ]
 
 
+def _linkedin_cookie_error_code(message: str) -> str:
+    text = (message or "").lower()
+    if "jsessionid" in text:
+        return "missing_jsessionid"
+    if "verification" in text or "captcha" in text or "checkpoint" in text:
+        return "linkedin_checkpoint"
+    if "expired" in text or "401" in text or "unauthorized" in text:
+        return "cookies_expired"
+    if "blocked" in text or "request denied" in text or "999" in text:
+        return "linkedin_blocked"
+    return "cookie_rejected"
+
+
 def _linkedin_proxies(user_id: str) -> dict | None:
     try:
         settings = storage.get_settings(user_id)
@@ -503,9 +516,14 @@ def linkedin_cookie():
     ok, err = linkedin.verify_li_at(user_id, li_at, jsessionid)
     if ok:
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
+        sched_module.add_session_log(user_id, "LinkedIn cookie login OK")
         sched_module.schedule_user_sessions(user_id)
         return jsonify({"connected": True})
-    return jsonify({"connected": False, "error": err or "invalid_cookie"}), 400
+    message = err or "LinkedIn rejected these cookies. Copy fresh li_at + JSESSIONID from linkedin.com."
+    error_code = _linkedin_cookie_error_code(message)
+    logger.warning("LinkedIn cookie login failed user=%s code=%s: %s", user_id, error_code, message)
+    sched_module.add_session_log(user_id, f"LinkedIn cookie login failed ({error_code}): {message}")
+    return jsonify({"connected": False, "error": message, "error_code": error_code}), 400
 
 
 @api.route("/api/linkedin/check/<user_id>", methods=["GET"])

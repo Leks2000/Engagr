@@ -4,6 +4,33 @@ import Toggle from '../components/Toggle'
 import TagInput from '../components/TagInput'
 import Slider from '../components/Slider'
 
+const COOKIE_ERROR_HELP = {
+  missing_jsessionid: [
+    'Copy JSESSIONID from the same linkedin.com Cookies table as li_at.',
+    'The value should start with ajax:; quotes are optional.',
+  ],
+  cookies_expired: [
+    'Open linkedin.com, refresh the page, and make sure you are still logged in.',
+    'Copy fresh li_at and JSESSIONID after the refresh.',
+  ],
+  linkedin_checkpoint: [
+    'Open linkedin.com in the browser and finish any security check/CAPTCHA first.',
+    'After the check is gone, refresh LinkedIn and copy fresh cookies.',
+  ],
+  linkedin_blocked: [
+    'LinkedIn rejected the server/proxy IP, not necessarily your pasted values.',
+    'Try OAuth or configure a trusted residential proxy, then copy fresh cookies.',
+  ],
+  cookie_rejected: [
+    'Refresh linkedin.com and copy both cookies again from the linkedin.com domain.',
+    'Check Dashboard logs or the Network response for the exact backend message.',
+  ],
+}
+
+function cookieErrorSteps(code) {
+  return COOKIE_ERROR_HELP[code] || COOKIE_ERROR_HELP.cookie_rejected
+}
+
 export default function LinkedInSettings({ userId: propUserId, settings, onSettingsUpdate }) {
   const li = settings?.linkedin || {}
   const uid = propUserId || userId
@@ -40,6 +67,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [loginErrorCode, setLoginErrorCode] = useState('')
   const [status, setStatus] = useState(li.connected || settings?.linkedin?.connected)
   const [authUrl, setAuthUrl] = useState('')
   const [authState, setAuthState] = useState('idle')
@@ -50,6 +78,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   const handleConnect = async () => {
     setConnecting(true)
     setLoginError('')
+    setLoginErrorCode('')
     try {
       const res = await api.get(`/api/linkedin/auth/${uid}`)
       setAuthUrl(res.url)
@@ -86,9 +115,9 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   }
 
   const handleCookieConnect = async () => {
-    if (!liAt.trim()) { setLoginError('Paste li_at cookie'); return }
-    if (!jsessionId.trim()) { setLoginError('Paste JSESSIONID cookie (starts with ajax:)'); return }
-    setConnecting(true); setLoginError('')
+    if (!liAt.trim()) { setLoginError('Paste li_at cookie'); setLoginErrorCode('cookie_rejected'); return }
+    if (!jsessionId.trim()) { setLoginError('Paste JSESSIONID cookie (starts with ajax:)'); setLoginErrorCode('missing_jsessionid'); return }
+    setConnecting(true); setLoginError(''); setLoginErrorCode('')
     try {
       const res = await api.post('/api/linkedin/cookie', {
         user_id: uid,
@@ -103,9 +132,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         onSettingsUpdate({ linkedin: { ...li, connected: true } })
       } else {
         setLoginError(res.error || 'Invalid cookies — copy fresh li_at + JSESSIONID')
+        setLoginErrorCode(res.error_code || 'cookie_rejected')
       }
     } catch (e) {
       setLoginError(e.message || 'Cookie login failed')
+      setLoginErrorCode(e.body?.error_code || 'cookie_rejected')
     }
     setConnecting(false)
   }
@@ -352,7 +383,11 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
             {loginError && (
               <div className="mb-3 p-2 rounded-lg text-xs" style={{ background: '#fef2f2', color: 'var(--color-danger)', border: '1px solid #fecaca' }}>
-                {loginError}
+                <div className="font-medium mb-1">{loginError}</div>
+                <ul className="list-disc pl-4 space-y-1" style={{ color: '#991b1b' }}>
+                  {cookieErrorSteps(loginErrorCode).map((step) => <li key={step}>{step}</li>)}
+                  <li>Open Dashboard logs for the latest backend attempt, or inspect F12 → Network → /api/linkedin/cookie → Response.</li>
+                </ul>
               </div>
             )}
 
@@ -419,7 +454,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                   <button
                     className="px-4 py-2.5 rounded-xl font-medium text-sm"
                     style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0' }}
-                    onClick={() => { setShowCookieForm(false); setLiAt(''); setJsessionId(''); setLoginError('') }}
+                    onClick={() => { setShowCookieForm(false); setLiAt(''); setJsessionId(''); setLoginError(''); setLoginErrorCode('') }}
                   >
                     Cancel
                   </button>

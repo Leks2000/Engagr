@@ -31,12 +31,20 @@ def _save_auth(user_id: str, auth_data: dict) -> None:
     path.write_text(json.dumps(auth_data))
 
 
-def _clean_cookie_value(value: str) -> str:
-    """Strip whitespace/quotes from pasted cookie values."""
-    v = (value or "").strip().strip('"').strip("'")
+def _clean_cookie_value(value: str, cookie_name: str = "") -> str:
+    """Strip whitespace/quotes and tolerate pasted ``name=value`` cookie rows."""
+    v = (value or "").strip()
     if "\n" in v:
         v = v.split("\n")[0].strip()
-    return v
+
+    if cookie_name:
+        # Users often paste the whole DevTools row/header fragment, e.g.
+        # `JSESSIONID="ajax:..."; Path=/` instead of just the value.
+        match = re.search(rf"(?:^|[;\s]){re.escape(cookie_name)}\s*=\s*([^;\s]+)", v, re.IGNORECASE)
+        if match:
+            v = match.group(1).strip()
+
+    return v.strip().strip('"').strip("'")
 
 
 def _build_linkedin_cookie_jar(li_at: str, jsessionid: str = "") -> requests.cookies.RequestsCookieJar:
@@ -46,8 +54,8 @@ def _build_linkedin_cookie_jar(li_at: str, jsessionid: str = "") -> requests.coo
     """
     jar = requests.cookies.RequestsCookieJar()
     domain = ".www.linkedin.com"
-    jar.set("li_at", _clean_cookie_value(li_at), domain=domain, path="/")
-    js = _clean_cookie_value(jsessionid)
+    jar.set("li_at", _clean_cookie_value(li_at, "li_at"), domain=domain, path="/")
+    js = _clean_cookie_value(jsessionid, "JSESSIONID")
     if js:
         if not js.startswith("ajax:"):
             js = js.lstrip('"').rstrip('"')
@@ -67,8 +75,8 @@ def ensure_client(user_id: str) -> bool:
 
 
 def verify_li_at(user_id: str, li_at: str, jsessionid: str = "") -> tuple[bool, str]:
-    li_at = _clean_cookie_value(li_at)
-    jsessionid = _clean_cookie_value(jsessionid)
+    li_at = _clean_cookie_value(li_at, "li_at")
+    jsessionid = _clean_cookie_value(jsessionid, "JSESSIONID")
     if not li_at:
         return False, "li_at cookie is empty"
     if not jsessionid:
@@ -100,13 +108,17 @@ def verify_li_at(user_id: str, li_at: str, jsessionid: str = "") -> tuple[bool, 
         except KeyError as e:
             last_error = f"Missing cookie field: {e}. Paste JSESSIONID from DevTools."
         except Exception as e:
-            last_error = str(e)
-            logger.error("LinkedIn verify_li_at failed user=%s mode=%s: %s", user_id, label, e)
+            last_error = str(e) or repr(e)
+            logger.error("LinkedIn verify_li_at failed user=%s mode=%s: %s", user_id, label, last_error)
 
     if "CHALLENGE" in last_error.upper() or "captcha" in last_error.lower():
         return False, "LinkedIn wants verification — open linkedin.com in browser, then copy fresh cookies."
     if "401" in last_error or "Unauthorized" in last_error:
         return False, "Cookies expired — log in to linkedin.com again and copy fresh li_at + JSESSIONID."
+    if "999" in last_error or "Request denied" in last_error:
+        return False, "LinkedIn blocked the server IP/session. Use OAuth or configure a trusted residential proxy, then copy fresh cookies."
+    if not last_error or last_error == "unknown error":
+        return False, "LinkedIn rejected these cookies. Open linkedin.com, confirm there is no checkpoint/CAPTCHA, then copy fresh li_at + JSESSIONID."
     return False, last_error[:220]
 
 
