@@ -50,6 +50,19 @@ LINKEDIN_PROXY_POOL = [
 ]
 
 
+def _linkedin_cookie_error_code(message: str) -> str:
+    text = (message or "").lower()
+    if "jsessionid" in text:
+        return "missing_jsessionid"
+    if "verification" in text or "captcha" in text or "checkpoint" in text:
+        return "linkedin_checkpoint"
+    if "expired" in text or "401" in text or "unauthorized" in text:
+        return "cookies_expired"
+    if "blocked" in text or "request denied" in text or "999" in text:
+        return "linkedin_blocked"
+    return "cookie_rejected"
+
+
 def _linkedin_proxies(user_id: str) -> dict | None:
     try:
         settings = storage.get_settings(user_id)

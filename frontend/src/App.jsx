@@ -53,7 +53,12 @@ export const api = {
     })
     let body = {}
     try { body = await res.json() } catch { /* empty */ }
-    if (!res.ok) throw new Error(body.error || body.message || `API error: ${res.status}`)
+    if (!res.ok) {
+      const err = new Error(body.error || body.message || `API error: ${res.status}`)
+      err.status = res.status
+      err.body = body
+      throw err
+    }
     return body
   },
 }
