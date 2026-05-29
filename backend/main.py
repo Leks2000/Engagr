@@ -550,11 +550,44 @@ def reddit_auth(user_id):
 def reddit_enable_discovery(user_id):
     """Enable Reddit discovery without API credentials."""
     try:
-        storage.update_settings(user_id, {"reddit": {"connected": True, "discovery_only": True}})
+        storage.update_settings(user_id, {
+            "reddit": {
+                "connected": True,
+                "discovery_only": True,
+                "discovery_connected": True,
+            }
+        })
         sched_module.schedule_user_sessions(user_id)
-        return jsonify({"connected": True, "mode": "discovery"})
+        return jsonify({"connected": True, "discovery_connected": True, "mode": "discovery"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/reddit/subreddit-suggestions/<user_id>", methods=["GET"])
+def reddit_subreddit_suggestions(user_id):
+    """Suggest subreddits from Reddit keywords, falling back to LinkedIn keywords."""
+    import reddit_public
+
+    try:
+        settings = storage.get_settings(user_id)
+        rd = settings.get("reddit", {})
+        li = settings.get("linkedin", {})
+        raw_keywords = request.args.get("keywords", "")
+        keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
+        if not keywords:
+            keywords = (rd.get("keywords") or []) + (li.get("keywords") or [])
+        suggestions = reddit_public.suggest_subreddits(keywords, limit=12)
+        return jsonify({"subreddits": suggestions, "keywords": keywords})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/reddit/diagnostics/<user_id>", methods=["GET"])
+def reddit_diagnostics(user_id):
+    """Return last Reddit parser diagnostics visible in the live session log."""
+    import reddit_public
+
+    return jsonify(reddit_public.get_last_diagnostics(user_id))
 
 
 @api.route("/api/reddit/cookie", methods=["POST"])
@@ -568,9 +601,15 @@ def reddit_cookie():
         return jsonify({"error": "user_id, reddit_session and token_v2 are required"}), 400
     ok, name = reddit_bot.verify_cookie_login(user_id, rs, tv2)
     if ok:
-        storage.update_settings(user_id, {"reddit": {"connected": True, "reddit_username": name}})
+        storage.update_settings(user_id, {
+            "reddit": {
+                "connected": True,
+                "account_connected": True,
+                "reddit_username": name,
+            }
+        })
         sched_module.schedule_user_sessions(user_id)
-        return jsonify({"connected": True})
+        return jsonify({"connected": True, "account_connected": True, "username": name})
     return jsonify({"connected": False, "error": "invalid_cookies"}), 400
 
 
@@ -580,13 +619,21 @@ def reddit_check(user_id):
     settings = storage.get_settings(user_id)
     rd = settings.get("reddit", {})
     has_api = reddit_bot.check_login(user_id)
-    has_discovery = bool(rd.get("subreddits")) or rd.get("discovery_only", False)
+    has_discovery = bool(rd.get("subreddits")) or rd.get("discovery_only", False) or rd.get("discovery_connected", False)
     connected = has_api or has_discovery or rd.get("connected", False)
-    storage.update_settings(user_id, {"reddit": {"connected": connected}})
+    storage.update_settings(user_id, {
+        "reddit": {
+            "connected": connected,
+            "account_connected": has_api,
+            "discovery_connected": has_discovery,
+        }
+    })
     return jsonify({
         "connected": connected,
         "discovery": has_discovery,
+        "discovery_connected": has_discovery,
         "api_login": has_api,
+        "account_connected": has_api,
     })
 
 
