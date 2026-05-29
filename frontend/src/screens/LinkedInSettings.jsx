@@ -35,6 +35,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
 
   // Login form
   const [liAt, setLiAt] = useState('')
+  const [jsessionId, setJsessionId] = useState('')
   const [showCookieForm, setShowCookieForm] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -85,20 +86,26 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
   }
 
   const handleCookieConnect = async () => {
-    if (!liAt.trim()) { setLoginError('Please enter your li_at cookie value'); return }
+    if (!liAt.trim()) { setLoginError('Paste li_at cookie'); return }
+    if (!jsessionId.trim()) { setLoginError('Paste JSESSIONID cookie (starts with ajax:)'); return }
     setConnecting(true); setLoginError('')
     try {
-      const res = await api.post('/api/linkedin/cookie', { user_id: uid, li_at: liAt.trim() })
+      const res = await api.post('/api/linkedin/cookie', {
+        user_id: uid,
+        li_at: liAt.trim(),
+        jsessionid: jsessionId.trim(),
+      })
       if (res.connected) {
         setStatus(true)
         setShowCookieForm(false)
         setLiAt('')
+        setJsessionId('')
         onSettingsUpdate({ linkedin: { ...li, connected: true } })
       } else {
-        setLoginError('Cookie is invalid or expired. Please get a fresh li_at from linkedin.com')
+        setLoginError(res.error || 'Invalid cookies — copy fresh li_at + JSESSIONID')
       }
     } catch (e) {
-      setLoginError('Cookie login failed. Make sure the cookie is valid.')
+      setLoginError(e.message || 'Cookie login failed')
     }
     setConnecting(false)
   }
@@ -340,7 +347,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
         ) : (
           <div className="card">
             <p className="text-[11px] mb-4" style={{ color: 'var(--color-muted)' }}>
-              Recommended: login via li_at session cookie. Password login may trigger 2FA/captcha.
+              Copy <b>li_at</b> and <b>JSESSIONID</b> from linkedin.com → F12 → Application → Cookies (both required).
             </p>
 
             {loginError && (
@@ -382,14 +389,23 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
             ) : (
               <div className="animate-fade-in">
                 <p className="text-[11px] mb-2" style={{ color: 'var(--color-muted)' }}>
-                  Open linkedin.com → DevTools → Application → Cookies → copy value of <code className="bg-gray-100 px-1 rounded">li_at</code>
+                  From the same Cookies table: <code className="bg-gray-100 px-1 rounded">li_at</code> and <code className="bg-gray-100 px-1 rounded">JSESSIONID</code>
                 </p>
+                <label className="text-[11px] font-medium">li_at</label>
                 <textarea
-                  className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none mb-2"
-                  style={{ borderColor: '#e2e8f0', minHeight: 60, fontFamily: 'monospace' }}
-                  placeholder="AQEDARx... (your li_at cookie value)"
+                  className="w-full px-3 py-2 border rounded-xl text-xs outline-none resize-none mb-2 mt-1"
+                  style={{ borderColor: '#e2e8f0', minHeight: 52, fontFamily: 'monospace' }}
+                  placeholder="AQEDARx..."
                   value={liAt}
                   onChange={e => setLiAt(e.target.value)}
+                />
+                <label className="text-[11px] font-medium">JSESSIONID</label>
+                <input
+                  className="w-full px-3 py-2 border rounded-xl text-xs outline-none mb-2 mt-1"
+                  style={{ borderColor: '#e2e8f0', fontFamily: 'monospace' }}
+                  placeholder='ajax:0133984500900249896'
+                  value={jsessionId}
+                  onChange={e => setJsessionId(e.target.value)}
                 />
                 <div className="flex gap-2">
                   <button
@@ -403,7 +419,7 @@ export default function LinkedInSettings({ userId: propUserId, settings, onSetti
                   <button
                     className="px-4 py-2.5 rounded-xl font-medium text-sm"
                     style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0' }}
-                    onClick={() => { setShowCookieForm(false); setLiAt(''); setLoginError('') }}
+                    onClick={() => { setShowCookieForm(false); setLiAt(''); setJsessionId(''); setLoginError('') }}
                   >
                     Cancel
                   </button>

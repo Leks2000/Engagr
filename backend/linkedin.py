@@ -31,29 +31,83 @@ def _save_auth(user_id: str, auth_data: dict) -> None:
     path.write_text(json.dumps(auth_data))
 
 
+def _clean_cookie_value(value: str) -> str:
+    """Strip whitespace/quotes from pasted cookie values."""
+    v = (value or "").strip().strip('"').strip("'")
+    if "\n" in v:
+        v = v.split("\n")[0].strip()
+    return v
+
+
+def _build_linkedin_cookie_jar(li_at: str, jsessionid: str = "") -> requests.cookies.RequestsCookieJar:
+    """
+    linkedin-api requires li_at + JSESSIONID (sets csrf-token from JSESSIONID).
+    Passing only li_at always fails with KeyError.
+    """
+    jar = requests.cookies.RequestsCookieJar()
+    domain = ".www.linkedin.com"
+    jar.set("li_at", _clean_cookie_value(li_at), domain=domain, path="/")
+    js = _clean_cookie_value(jsessionid)
+    if js:
+        if not js.startswith("ajax:"):
+            js = js.lstrip('"').rstrip('"')
+        jar.set("JSESSIONID", f'"{js}"' if not js.startswith('"') else js, domain=domain, path="/")
+    return jar
+
+
 def ensure_client(user_id: str) -> bool:
     """Load linkedin-api client from saved li_at if not in memory."""
     if user_id in _clients:
         return True
     auth = _load_auth(user_id)
     if auth.get("li_at"):
-        return verify_li_at(user_id, auth["li_at"])
+        ok, _ = verify_li_at(user_id, auth["li_at"], auth.get("jsessionid", ""))
+        return ok
     return False
 
 
-def verify_li_at(user_id: str, li_at: str) -> bool:
-    try:
-        proxies = _proxy_dict(user_id)
-        client = Linkedin("", "", cookies={"li_at": li_at}, proxies=proxies)
-        profile = client.get_profile("me")
-        _clients[user_id] = client
-        _profile_ids[user_id] = profile.get("profile_id") or profile.get("public_id") or ""
-        _save_auth(user_id, {"auth_method": "cookie", "li_at": li_at})
-        logger.info("LinkedIn cookie auth OK for user %s", user_id)
-        return True
-    except Exception as e:
-        logger.error("LinkedIn verify_li_at failed user=%s: %s", user_id, e)
-        return False
+def verify_li_at(user_id: str, li_at: str, jsessionid: str = "") -> tuple[bool, str]:
+    li_at = _clean_cookie_value(li_at)
+    jsessionid = _clean_cookie_value(jsessionid)
+    if not li_at:
+        return False, "li_at cookie is empty"
+    if not jsessionid:
+        return False, "JSESSIONID is required — copy it from DevTools next to li_at (value starts with ajax:)"
+
+    last_error = "unknown error"
+    attempts: list[tuple[str, dict | None]] = [("direct", None)]
+    proxy = _proxy_dict(user_id)
+    if proxy:
+        attempts.append(("proxy", proxy))
+
+    for label, proxies in attempts:
+        try:
+            jar = _build_linkedin_cookie_jar(li_at, jsessionid)
+            client = Linkedin("", "", cookies=jar, proxies=proxies or {})
+            profile = client.get_profile("me")
+            if not profile:
+                last_error = "LinkedIn returned empty profile"
+                continue
+            _clients[user_id] = client
+            _profile_ids[user_id] = profile.get("profile_id") or profile.get("public_id") or ""
+            _save_auth(user_id, {
+                "auth_method": "cookie",
+                "li_at": li_at,
+                "jsessionid": jsessionid,
+            })
+            logger.info("LinkedIn cookie auth OK user=%s via %s", user_id, label)
+            return True, ""
+        except KeyError as e:
+            last_error = f"Missing cookie field: {e}. Paste JSESSIONID from DevTools."
+        except Exception as e:
+            last_error = str(e)
+            logger.error("LinkedIn verify_li_at failed user=%s mode=%s: %s", user_id, label, e)
+
+    if "CHALLENGE" in last_error.upper() or "captcha" in last_error.lower():
+        return False, "LinkedIn wants verification — open linkedin.com in browser, then copy fresh cookies."
+    if "401" in last_error or "Unauthorized" in last_error:
+        return False, "Cookies expired — log in to linkedin.com again and copy fresh li_at + JSESSIONID."
+    return False, last_error[:220]
 
 
 def _proxy_url(user_id: str) -> str:
@@ -215,7 +269,8 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
             pass
     auth = _load_auth(uid)
     if auth.get("li_at"):
-        return verify_li_at(uid, auth["li_at"])
+        ok, _ = verify_li_at(uid, auth["li_at"], auth.get("jsessionid", ""))
+        return ok
     if auth.get("access_token"):
         headers = {"Authorization": f"Bearer {auth['access_token']}"}
         proxies = _proxy_dict(uid)

@@ -497,14 +497,15 @@ def linkedin_cookie():
     data = request.get_json() or {}
     user_id = data.get("user_id", "")
     li_at = data.get("li_at", "")
+    jsessionid = data.get("jsessionid", data.get("JSESSIONID", ""))
     if not user_id or not li_at:
         return jsonify({"error": "user_id and li_at are required"}), 400
-    ok = linkedin.verify_li_at(user_id, li_at)
+    ok, err = linkedin.verify_li_at(user_id, li_at, jsessionid)
     if ok:
         storage.update_settings(user_id, {"linkedin": {"connected": True}})
         sched_module.schedule_user_sessions(user_id)
         return jsonify({"connected": True})
-    return jsonify({"connected": False, "error": "invalid_cookie"}), 400
+    return jsonify({"connected": False, "error": err or "invalid_cookie"}), 400
 
 
 @api.route("/api/linkedin/check/<user_id>", methods=["GET"])
