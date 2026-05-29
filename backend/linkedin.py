@@ -5,6 +5,7 @@ import logging
 import re
 import requests
 from linkedin_api import Linkedin
+from requests.exceptions import TooManyRedirects
 
 from config import WEBSHARE_PROXY_URL, linkedin_cookies_path
 import storage
@@ -309,11 +310,18 @@ async def check_login(_playwright_unused=None, user_id: str | None = None) -> bo
     uid = user_id or ""
     if uid in _clients:
         try:
-            profile = _clients[uid].get_profile("me")
-            _profile_ids[uid] = profile.get("profile_id") or profile.get("public_id") or ""
+            profile = _fetch_current_profile(_clients[uid])
+            mini_profile = profile.get("miniProfile") or {}
+            _profile_ids[uid] = (
+                profile.get("plainId")
+                or mini_profile.get("publicIdentifier")
+                or profile.get("publicIdentifier")
+                or ""
+            )
             return True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("LinkedIn cached client check failed user=%s: %s", uid, e)
+            _clients.pop(uid, None)
     auth = _load_auth(uid)
     if auth.get("li_at"):
         ok, _ = verify_li_at(uid, auth["li_at"], auth.get("jsessionid", ""))

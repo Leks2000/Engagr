@@ -682,14 +682,13 @@ def run_session_now(user_id):
         max_posts = min(li_cfg.get("comments_per_day", 5), li_cfg.get("daily_comment_hard_limit", 10))
         user_language = settings.get("language", "en")
 
-        # Apply warm-up mode limit
+        # Apply warm-up mode limit. Do not import datetime in this function: it
+        # shadows the module-level import and breaks non-warmup sessions later.
         if li_cfg.get("warmup_mode", False):
-            from datetime import datetime, timezone
             started = li_cfg.get("warmup_started_at") or datetime.now(timezone.utc).date().isoformat()
             try:
                 start_dt = datetime.fromisoformat(started)
                 if start_dt.tzinfo is None:
-                    from datetime import timezone as tz
                     start_dt = start_dt.replace(tzinfo=timezone.utc)
             except Exception:
                 start_dt = datetime.now(timezone.utc)
@@ -716,6 +715,18 @@ def run_session_now(user_id):
             sched_module._log(user_id, "⚠️ Trying OAuth (usually only your own posts)...")
             posts = linkedin.scrape_posts_oauth(user_id, keywords, max_posts=max_posts)
         sched_module._log(user_id, f"📄 Found {len(posts)} posts matching keywords.")
+        if not posts:
+            if has_li_at:
+                sched_module._log(
+                    user_id,
+                    "💡 LinkedIn cookie mode scans your home feed/search fallback, not the whole public web. "
+                    "Try broader keywords, follow/comment on relevant creators, or run again after refreshing cookies.",
+                )
+            elif auth.get("access_token"):
+                sched_module._log(
+                    user_id,
+                    "💡 OAuth mode usually returns only your own LinkedIn content; paste li_at + JSESSIONID for discovery.",
+                )
 
         # Apply humanness filter — skip AI-generated posts
         pre_filter_count = len(posts)
