@@ -173,3 +173,16 @@ def add_connected_profile(user_id: str, profile_url: str):
         if profile_url not in profiles:
             profiles.append(profile_url)
             path.write_text(json.dumps(profiles, ensure_ascii=False), encoding="utf-8")
+
+
+# ── Aliases (for backward compatibility) ──────────────
+
+load_settings = get_settings
+load_stats = get_stats
+
+
+def save_stats(user_id: str, stats: dict):
+    """Save stats JSON directly (used by X/Twitter module)."""
+    with _get_lock(user_id):
+        path = _user_dir(user_id) / "stats.json"
+        _write_json(path, stats)

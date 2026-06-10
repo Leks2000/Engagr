@@ -1,93 +1,128 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Engagr WebBridge</title>
-    <link rel="stylesheet" href="popup.css" />
-  </head>
-  <body>
-    <main class="bridge-card" aria-live="polite">
-      <header class="bridge-header">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 48 48" role="img">
-              <rect width="48" height="48" rx="13" fill="#050505" />
-              <path d="M14 30.5c5.6-12.8 15.6-12.8 21.4-3.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" />
-              <path d="M18.5 17.5 34 33" stroke="#fff" stroke-width="2.4" stroke-linecap="round" />
-              <circle cx="17" cy="18" r="4.2" fill="none" stroke="#fff" stroke-width="2.2" />
-            </svg>
-          </div>
-          <div>
-            <h1>Engagr WebBridge</h1>
-            <p id="activeTabLabel">Checking current tab…</p>
-          </div>
-        </div>
-
-        <div id="statusPill" class="status-pill is-checking">
-          <span class="status-dot"></span>
-          <span id="statusText">Checking</span>
-        </div>
-      </header>
-
-      <section class="connection-hero">
-        <div class="signal-orb" aria-hidden="true">
-          <svg viewBox="0 0 32 32">
-            <path d="M6 13.5a16 16 0 0 1 20 0" />
-            <path d="M10 18a9.5 9.5 0 0 1 12 0" />
-            <path d="M14 22.5a4 4 0 0 1 4 0" />
-            <circle cx="16" cy="26" r="1.7" />
-          </svg>
-        </div>
-        <h2 id="heroTitle">Desktop client connected</h2>
-        <p id="heroSubtitle">Browser assistant is ready</p>
-      </section>
-
-
-      <section class="parser-panel" aria-label="LinkedIn parser">
-        <div class="parser-header">
-          <div>
-            <h3>LinkedIn Parser</h3>
-            <p id="parserStatus">Scan the open LinkedIn feed for posts.</p>
-          </div>
-          <span id="parserCount" class="parser-count">0</span>
-        </div>
-        <button id="scanLinkedInButton" type="button" class="scan-button">Scan LinkedIn feed</button>
-        <div id="parsedPosts" class="parsed-posts" hidden></div>
-      </section>
-
-      <section class="actions-panel" aria-label="Approved LinkedIn actions">
-        <div class="parser-header">
-          <div>
-            <h3>Approved Actions</h3>
-            <p id="actionsStatus">Approve posts in the Mini App, then execute them here.</p>
-          </div>
-          <span id="actionsCount" class="parser-count">0</span>
-        </div>
-        <button id="refreshActionsButton" type="button" class="scan-button">Load approved actions</button>
-        <div id="approvedActions" class="parsed-posts" hidden></div>
-      </section>
-
-      <section class="settings-panel auto-sync-panel" aria-label="Mini App sync status">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Engagr WebBridge</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="header-left">
+        <div class="logo-mark">E</div>
         <div>
-          <h3>Mini App Sync</h3>
-          <p id="syncSummary">Open Engagr Mini App once and the bridge will connect automatically.</p>
+          <h1 class="header-title">Engagr WebBridge</h1>
+          <p class="header-subtitle" id="activeTabLabel">Ready for workflows</p>
         </div>
-        <div class="sync-details">
-          <span>Telegram</span>
-          <strong id="syncedUserId">Not synced</strong>
+      </div>
+      <div class="header-right">
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot"></span>
+          <span class="status-text" id="statusText">Checking</span>
         </div>
-        <div class="sync-details">
-          <span>LinkedIn keywords</span>
-          <strong id="syncedKeywords">Waiting for Mini App settings</strong>
-        </div>
-      </section>
+      </div>
+    </header>
 
-      <footer class="actions-row">
-        <button id="checkButton" type="button" class="secondary">Re-check sync</button>
-      </footer>
-    </main>
+    <!-- Connection Section -->
+    <section class="section">
+      <div class="section-header">
+        <h2 id="heroTitle">Checking connection...</h2>
+        <p id="heroSubtitle">Connecting to Engagr backend</p>
+      </div>
 
-    <script type="module" src="popup.js"></script>
-  </body>
+      <!-- Auth status -->
+      <div class="auth-info" id="authInfo" hidden>
+        <div class="info-row">
+          <span class="info-label">User ID</span>
+          <span class="info-value" id="syncedUserId">Not synced</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Auth</span>
+          <span class="info-value" id="authMethod">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Keywords</span>
+          <span class="info-value" id="syncedKeywords">—</span>
+        </div>
+        <div class="info-row" id="syncSummaryRow">
+          <span class="info-label">Status</span>
+          <span class="info-value" id="syncSummary">—</span>
+        </div>
+      </div>
+
+      <!-- Login section (shown when not connected) -->
+      <div class="login-section" id="loginSection" hidden>
+        <p class="login-hint">Enter the login code from Engagr Mini App:</p>
+        <div class="login-form">
+          <input type="text" id="loginCodeInput" placeholder="Paste login code..." class="login-input" />
+          <button type="button" id="loginButton" class="btn btn-primary btn-sm">Connect</button>
+        </div>
+        <p class="login-error" id="loginError" hidden></p>
+      </div>
+
+      <div class="button-row">
+        <button type="button" class="btn btn-secondary" id="checkButton">↻ Refresh</button>
+        <button type="button" class="btn btn-primary" id="pollTasksButton">📥 Fetch Tasks</button>
+      </div>
+    </section>
+
+    <!-- Platform Tabs -->
+    <div class="platform-tabs" id="platformTabs">
+      <button type="button" class="platform-tab active" data-platform="tasks">
+        📋 Tasks <span class="task-badge" id="taskBadge" hidden>0</span>
+      </button>
+      <button type="button" class="platform-tab" data-platform="linkedin">🔗 LinkedIn</button>
+      <button type="button" class="platform-tab" data-platform="x">𝕏 Twitter</button>
+    </div>
+
+    <!-- Tasks Panel -->
+    <section class="section platform-panel" id="tasksPanel">
+      <div class="section-header">
+        <h3>Approved Tasks</h3>
+        <p class="actions-status" id="actionsStatus">Loading tasks...</p>
+      </div>
+      <div class="actions-count">
+        <span id="actionsCount">0</span> ready
+      </div>
+      <div id="approvedActions" class="post-list" hidden></div>
+    </section>
+
+    <!-- LinkedIn Panel -->
+    <section class="section platform-panel" id="linkedinPanel" hidden>
+      <div class="section-header">
+        <h3>LinkedIn Feed</h3>
+        <button type="button" class="btn btn-sm btn-secondary" id="scanLinkedInButton">🔍 Scan Feed</button>
+      </div>
+      <p class="parser-status" id="parserStatus">Open LinkedIn and scan for posts.</p>
+      <div class="parser-count">
+        <span id="parserCount">0</span> posts found
+      </div>
+      <div id="parsedPosts" class="post-list" hidden></div>
+    </section>
+
+    <!-- X/Twitter Panel -->
+    <section class="section platform-panel" id="xPanel" hidden>
+      <div class="section-header">
+        <h3>X / Twitter Feed</h3>
+        <button type="button" class="btn btn-sm btn-secondary" id="scanXButton">🔍 Scan Feed</button>
+      </div>
+      <p class="x-status" id="xStatus">Open X/Twitter and scan for tweets.</p>
+      <div class="parser-count">
+        <span id="xCount">0</span> tweets found
+      </div>
+      <div id="parsedTweets" class="post-list" hidden></div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <span>Engagr WebBridge v0.5.0</span>
+      <span class="footer-sep">·</span>
+      <span id="lastPollTime">—</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
 </html>

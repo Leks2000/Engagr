@@ -37,6 +37,7 @@ import ai_comment
 import user_memory
 import ideas_engine
 import twitter_bot
+import auth as auth_module
 
 # ── Logging ───────────────────────────────────────────
 
@@ -110,6 +111,265 @@ CORS(api, origins=["*"])
 @api.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "engagr"})
+
+
+# ── Authentication Endpoints ─────────────────────────
+
+@api.route("/api/auth/telegram", methods=["POST"])
+def auth_telegram():
+    """
+    Authenticate via Telegram initData.
+    Returns JWT token for extension and API usage.
+    
+    Body: { "initData": "..." } or { "user_id": "..." } (dev mode)
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        init_data = body.get("initData") or body.get("init_data") or ""
+        dev_user_id = body.get("user_id", "")
+
+        user_data = None
+
+        if init_data:
+            user_data = auth_module.verify_telegram_init_data(init_data)
+            if not user_data:
+                return jsonify({"error": "Invalid Telegram initData", "code": "invalid_init_data"}), 401
+        elif dev_user_id:
+            # Dev mode: allow direct user_id for testing
+            if os.environ.get("APP_ENV") == "production":
+                return jsonify({"error": "Direct user_id auth disabled in production", "code": "dev_only"}), 403
+            user_data = {
+                "id": str(dev_user_id),
+                "first_name": "Dev",
+                "username": "dev_user",
+                "verified": False,
+            }
+        else:
+            return jsonify({"error": "initData or user_id required", "code": "missing_auth"}), 400
+
+        user_id = user_data["id"]
+        
+        # Ensure user has settings (auto-create)
+        storage.get_settings(user_id)
+
+        # Generate JWT token
+        token = auth_module.generate_token(user_id, extra_claims={
+            "username": user_data.get("username", ""),
+            "verified": user_data.get("verified", False),
+        })
+
+        return jsonify({
+            "ok": True,
+            "token": token,
+            "user_id": user_id,
+            "user": {
+                "id": user_id,
+                "first_name": user_data.get("first_name", ""),
+                "username": user_data.get("username", ""),
+                "verified": user_data.get("verified", False),
+            },
+        })
+    except Exception as e:
+        logger.error("Auth telegram error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/auth/extension-login-code", methods=["POST"])
+def auth_extension_login_code():
+    """
+    Generate a short-lived code for extension login.
+    Called from Mini App. User copies this code to extension.
+    
+    Body: { "user_id": "..." } (requires valid session or dev mode)
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        user_id = body.get("user_id", "")
+        
+        if not user_id:
+            return jsonify({"error": "user_id required"}), 400
+
+        # Generate login code (short-lived JWT)
+        code = auth_module.generate_extension_login_code(user_id)
+        
+        return jsonify({
+            "ok": True,
+            "code": code,
+            "expires_in": 300,  # 5 minutes
+        })
+    except Exception as e:
+        logger.error("Extension login code error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/auth/extension-verify", methods=["POST"])
+def auth_extension_verify():
+    """
+    Verify extension login code and return long-lived JWT token.
+    Called from the Chrome Extension.
+    
+    Body: { "code": "..." }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        code = body.get("code", "")
+        
+        if not code:
+            return jsonify({"error": "code required"}), 400
+
+        user_id = auth_module.validate_extension_login_code(code)
+        if not user_id:
+            return jsonify({"error": "Invalid or expired login code", "code": "invalid_code"}), 401
+
+        # Generate long-lived token for extension
+        token = auth_module.generate_token(user_id, extra_claims={
+            "client": "extension",
+        })
+
+        return jsonify({
+            "ok": True,
+            "token": token,
+            "user_id": user_id,
+        })
+    except Exception as e:
+        logger.error("Extension verify error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/auth/validate", methods=["GET"])
+def auth_validate():
+    """
+    Validate a JWT token (from Authorization header).
+    Returns user info if valid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"valid": False, "error": "No bearer token"}), 401
+
+    token = auth_header[7:]
+    payload = auth_module.verify_token(token)
+    
+    if not payload:
+        return jsonify({"valid": False, "error": "Invalid or expired token"}), 401
+
+    return jsonify({
+        "valid": True,
+        "user_id": payload.get("sub"),
+        "issued_at": payload.get("iat"),
+        "expires_at": payload.get("exp"),
+        "client": payload.get("client", "miniapp"),
+    })
+
+
+# ── Tasks Endpoint (Extension Polling) ───────────────
+
+@api.route("/api/tasks", methods=["GET"])
+def get_tasks():
+    """
+    Get pending/approved tasks for a user (Chrome Extension polling endpoint).
+    
+    Query params:
+      - userId: Telegram user ID (required)
+      - status: filter by status (default: "approved")
+      - platform: filter by platform (optional: "linkedin", "x", "all")
+      - limit: max items (default: 20)
+    
+    Also accepts Authorization: Bearer <token> header.
+    If token is present, userId param is optional (extracted from token).
+    """
+    try:
+        # Get user_id from token or query param
+        user_id = None
+        auth_header = request.headers.get("Authorization", "")
+        
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = auth_module.verify_token(token)
+            if payload:
+                user_id = payload.get("sub")
+        
+        if not user_id:
+            user_id = request.args.get("userId") or request.args.get("user_id") or ""
+        
+        if not user_id:
+            return jsonify({"error": "userId required (via query param or Bearer token)"}), 400
+
+        status_filter = request.args.get("status", "approved")
+        platform_filter = request.args.get("platform", "all")
+        limit = min(int(request.args.get("limit", 20)), 50)
+
+        queue = storage.get_queue(user_id)
+        
+        # Filter tasks
+        tasks = []
+        for item in queue:
+            # Status filter
+            if status_filter != "all" and item.get("status") != status_filter:
+                continue
+            # Platform filter
+            if platform_filter != "all" and item.get("platform") != platform_filter:
+                continue
+            tasks.append(item)
+
+        # Sort by created_at (newest first)
+        tasks.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        tasks = tasks[:limit]
+
+        return jsonify({
+            "ok": True,
+            "tasks": tasks,
+            "total": len(tasks),
+            "user_id": user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.error("Tasks endpoint error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/tasks/<task_id>/status", methods=["PUT"])
+def update_task_status(task_id):
+    """
+    Update task status (used by extension to mark tasks as done/in_progress).
+    
+    Body: { "user_id": "...", "status": "completed"|"in_progress"|"dismissed" }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        
+        # Get user_id from token or body
+        user_id = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = auth_module.verify_token(token)
+            if payload:
+                user_id = payload.get("sub")
+        
+        if not user_id:
+            user_id = body.get("user_id") or body.get("userId") or ""
+        
+        if not user_id:
+            return jsonify({"error": "user_id required"}), 400
+
+        new_status = body.get("status", "")
+        if new_status not in ("completed", "in_progress", "dismissed", "failed"):
+            return jsonify({"error": "Invalid status. Use: completed, in_progress, dismissed, failed"}), 400
+
+        # Update the queue item
+        updates = {
+            "status": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if new_status == "completed":
+            updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+        storage.update_queue_item(user_id, task_id, updates)
+
+        return jsonify({"ok": True, "task_id": task_id, "status": new_status})
+    except Exception as e:
+        logger.error("Task status update error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Settings Endpoints ────────────────────────────────

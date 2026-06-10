@@ -49,7 +49,7 @@
       {
         source: SOURCE_FROM_EXT,
         type: 'ENGAGR_BRIDGE_READY',
-        payload: { version: '0.4.0' },
+        payload: { version: '0.5.0' },
       },
       '*',
     )

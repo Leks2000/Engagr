@@ -1,41 +1,82 @@
+/**
+ * popup.js — Engagr WebBridge popup logic
+ *
+ * Handles:
+ *  - Connection status & authentication
+ *  - Task polling display with badge
+ *  - LinkedIn feed scanning & AI comments
+ *  - X/Twitter feed scanning & AI comments
+ *  - Platform tab switching
+ *  - Extension login flow
+ */
+
 const DEFAULT_SETTINGS = {
   miniAppUrl: 'http://localhost:5173',
   apiBaseUrl: 'https://engagr-production.up.railway.app',
   telegramUserId: '',
   aiProvider: 'groq',
-  autoOpenLinkedIn: true,
-  autoScanLinkedIn: true,
-  lastConnectionCheck: null,
-  lastMiniAppSync: null,
+  jwtToken: '',
   linkedinKeywords: [],
 }
 
+// ─── DOM References ───────────────────────────────────────
+
+const $ = (sel) => document.querySelector(sel)
 const elements = {
-  activeTabLabel: document.querySelector('#activeTabLabel'),
-  statusPill: document.querySelector('#statusPill'),
-  statusText: document.querySelector('#statusText'),
-  heroTitle: document.querySelector('#heroTitle'),
-  heroSubtitle: document.querySelector('#heroSubtitle'),
-  checkButton: document.querySelector('#checkButton'),
-  scanLinkedInButton: document.querySelector('#scanLinkedInButton'),
-  parserStatus: document.querySelector('#parserStatus'),
-  parserCount: document.querySelector('#parserCount'),
-  parsedPosts: document.querySelector('#parsedPosts'),
-  actionsStatus: document.querySelector('#actionsStatus'),
-  actionsCount: document.querySelector('#actionsCount'),
-  approvedActions: document.querySelector('#approvedActions'),
-  refreshActionsButton: document.querySelector('#refreshActionsButton'),
-  syncSummary: document.querySelector('#syncSummary'),
-  syncedUserId: document.querySelector('#syncedUserId'),
-  syncedKeywords: document.querySelector('#syncedKeywords'),
+  // Header
+  activeTabLabel: $('#activeTabLabel'),
+  statusPill: $('#statusPill'),
+  statusText: $('#statusText'),
+  heroTitle: $('#heroTitle'),
+  heroSubtitle: $('#heroSubtitle'),
+  checkButton: $('#checkButton'),
+  pollTasksButton: $('#pollTasksButton'),
+  // Auth
+  authInfo: $('#authInfo'),
+  syncedUserId: $('#syncedUserId'),
+  authMethod: $('#authMethod'),
+  syncedKeywords: $('#syncedKeywords'),
+  syncSummary: $('#syncSummary'),
+  loginSection: $('#loginSection'),
+  loginCodeInput: $('#loginCodeInput'),
+  loginButton: $('#loginButton'),
+  loginError: $('#loginError'),
+  // Tabs
+  platformTabs: $('#platformTabs'),
+  taskBadge: $('#taskBadge'),
+  // Tasks panel
+  tasksPanel: $('#tasksPanel'),
+  actionsStatus: $('#actionsStatus'),
+  actionsCount: $('#actionsCount'),
+  approvedActions: $('#approvedActions'),
+  // LinkedIn panel
+  linkedinPanel: $('#linkedinPanel'),
+  scanLinkedInButton: $('#scanLinkedInButton'),
+  parserStatus: $('#parserStatus'),
+  parserCount: $('#parserCount'),
+  parsedPosts: $('#parsedPosts'),
+  // X panel
+  xPanel: $('#xPanel'),
+  scanXButton: $('#scanXButton'),
+  xStatus: $('#xStatus'),
+  xCount: $('#xCount'),
+  parsedTweets: $('#parsedTweets'),
+  // Footer
+  lastPollTime: $('#lastPollTime'),
 }
 
-const storageKeys = Object.keys(DEFAULT_SETTINGS)
+// ─── State ────────────────────────────────────────────────
 
-function normalizeUrl(value, fallback = DEFAULT_SETTINGS.miniAppUrl) {
+let activePanel = 'tasks'
+let pendingTasks = []
+let parsedLinkedInPosts = []
+let parsedXTweets = []
+
+// ─── Utilities ────────────────────────────────────────────
+
+function normalizeUrl(value, fallback = DEFAULT_SETTINGS.apiBaseUrl) {
   const trimmed = String(value || '').trim()
   if (!trimmed) return fallback
-
   try {
     return new URL(trimmed).toString().replace(/\/$/, '')
   } catch {
@@ -44,50 +85,9 @@ function normalizeUrl(value, fallback = DEFAULT_SETTINGS.miniAppUrl) {
 }
 
 async function loadSettings() {
-  const stored = await chrome.storage.sync.get(storageKeys)
+  const keys = Object.keys(DEFAULT_SETTINGS)
+  const stored = await chrome.storage.sync.get(keys)
   return { ...DEFAULT_SETTINGS, ...stored }
-}
-
-function maskUserId(userId) {
-  const value = String(userId || '').trim()
-  if (!value) return 'Not synced'
-  if (value.length <= 4) return value
-  return `${value.slice(0, 2)}…${value.slice(-3)}`
-}
-
-function renderSettings(settings) {
-  const keywords = Array.isArray(settings.linkedinKeywords) ? settings.linkedinKeywords.filter(Boolean) : []
-  elements.syncedUserId.textContent = maskUserId(settings.telegramUserId)
-  elements.syncedKeywords.textContent = keywords.length ? keywords.slice(0, 5).join(', ') : 'No LinkedIn keywords selected'
-  elements.syncSummary.textContent = settings.telegramUserId
-    ? `Synced automatically${settings.lastMiniAppSync ? ` · ${new Date(settings.lastMiniAppSync).toLocaleTimeString()}` : ''}`
-    : 'Open Engagr Mini App once and the bridge will connect automatically.'
-}
-
-function setStatus(state, title, subtitle) {
-  elements.statusPill.classList.toggle('is-checking', state === 'checking')
-  elements.statusPill.classList.toggle('is-offline', state === 'offline')
-  elements.statusText.textContent = state === 'online' ? 'Connected' : state === 'offline' ? 'Offline' : 'Checking'
-  elements.heroTitle.textContent = title
-  elements.heroSubtitle.textContent = subtitle
-}
-
-async function getActiveTab() {
-  const response = await chrome.runtime.sendMessage({ type: 'ENGAGR_GET_ACTIVE_TAB' })
-  return response?.tab || null
-}
-
-function isLinkedInUrl(url) {
-  return /^https?:\/\/(www\.)?linkedin\.com\//i.test(url || '')
-}
-
-async function renderActiveTab() {
-  try {
-    const tab = await getActiveTab()
-    elements.activeTabLabel.textContent = isLinkedInUrl(tab?.url) ? 'LinkedIn tab detected' : 'Ready for LinkedIn workflows'
-  } catch {
-    elements.activeTabLabel.textContent = 'Ready for LinkedIn workflows'
-  }
 }
 
 function escapeHtml(value) {
@@ -96,441 +96,556 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
 }
 
-function selectedComment(item) {
-  return item?.aiComment?.selected_comment || item?.aiComment?.variants?.[0] || ''
+function maskUserId(userId) {
+  const v = String(userId || '').trim()
+  if (!v) return 'Not synced'
+  if (v.length <= 4) return v
+  return `${v.slice(0, 2)}...${v.slice(-3)}`
 }
 
-function renderParsedPosts(posts = [], parsedAt = null) {
-  elements.parserCount.textContent = String(posts.length)
-  elements.parsedPosts.hidden = posts.length === 0
-  elements.parserStatus.textContent = posts.length
-    ? `Parsed ${posts.length} relevant post${posts.length === 1 ? '' : 's'}${parsedAt ? ' from current feed.' : '.'}`
-    : 'Open LinkedIn; Engagr will scan using Mini App settings.'
-
-  elements.parsedPosts.innerHTML = posts.slice(0, 5).map((item, index) => {
-    const comment = selectedComment(item)
-    const variants = item?.aiComment?.variants || []
-
-    return `
-      <article class="parsed-post-card">
-        <strong>${escapeHtml(item.author || 'Unknown author')}</strong>
-        <p>${escapeHtml(item.post || '')}</p>
-        ${comment ? `<div class="ai-comment"><span>AI comment</span><p>${escapeHtml(comment)}</p></div>` : ''}
-        ${variants.length > 1 ? `<div class="variant-count">${variants.length} variants ready</div>` : ''}
-        <div class="post-actions">
-          <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">Open post</a>
-          <button type="button" class="mini-action" data-generate-index="${index}">${comment ? 'Regenerate' : 'Generate AI'}</button>
-        </div>
-      </article>
-    `
-  }).join('')
-}
-
-async function loadParsedPosts() {
-  const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinParsedAt'])
-  renderParsedPosts(stored.linkedinParsedPosts || [], stored.linkedinParsedAt || null)
-}
-
-async function saveParsedPosts(posts, parsedAt = new Date().toISOString()) {
-  await chrome.storage.local.set({
-    linkedinParsedPosts: posts,
-    linkedinParsedAt: parsedAt,
-  })
-  renderParsedPosts(posts, parsedAt)
+function timeAgo(isoStr) {
+  if (!isoStr) return '—'
+  const diff = Date.now() - new Date(isoStr).getTime()
+  if (diff < 60000) return 'just now'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  return `${Math.floor(diff / 3600000)}h ago`
 }
 
 function apiUrl(path, settings) {
-  return `${normalizeUrl(settings.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl)}${path}`
+  return `${normalizeUrl(settings.apiBaseUrl)}${path}`
 }
 
-async function getJson(url) {
-  const response = await fetch(url)
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || `API error: ${response.status}`)
-  return data
-}
-
-async function postJson(url, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    throw new Error(data.error || `API error: ${response.status}`)
-  }
-
-  return data
-}
-
-async function refreshMiniAppSettings(settings) {
-  const userId = settings.telegramUserId.trim()
-  if (!userId) return settings
-
-  try {
-    const data = await getJson(apiUrl(`/api/settings/${encodeURIComponent(userId)}`, settings))
-    const linkedinKeywords = Array.isArray(data?.linkedin?.keywords) ? data.linkedin.keywords : settings.linkedinKeywords
-    const next = {
-      linkedinKeywords,
-      aiProvider: settings.aiProvider || DEFAULT_SETTINGS.aiProvider,
-    }
-    await chrome.storage.sync.set(next)
-    return { ...settings, ...next }
-  } catch {
-    return settings
-  }
-}
-
-function filterByKeywords(posts, keywords) {
-  const normalized = (keywords || [])
-    .map((keyword) => String(keyword || '').trim().toLowerCase())
-    .filter(Boolean)
-
-  if (!normalized.length) return posts
-
-  return posts.filter((post) => {
-    const text = `${post.author || ''} ${post.post || ''}`.toLowerCase()
-    return normalized.some((keyword) => text.includes(keyword))
-  })
-}
-
-async function generateAiComment(index, { silent = false } = {}) {
+async function fetchJson(url, options = {}) {
   const settings = await loadSettings()
-  const userId = settings.telegramUserId.trim()
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
 
-  if (!userId) {
-    if (!silent) elements.parserStatus.textContent = 'Open the Mini App once so the bridge can sync your Telegram user ID.'
-    return false
+  if (settings.jwtToken) {
+    headers['Authorization'] = `Bearer ${settings.jwtToken}`
   }
 
-  const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinParsedAt'])
-  const posts = stored.linkedinParsedPosts || []
-  const item = posts[index]
-  if (!item) return false
+  const resp = await fetch(url, { ...options, headers })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(data.error || `API ${resp.status}`)
+  return data
+}
 
-  if (!silent) elements.parserStatus.textContent = item.aiComment ? 'Regenerating AI comment…' : 'Generating AI comment…'
+// ─── Platform Tab Switching ───────────────────────────────
+
+function switchPanel(panel) {
+  activePanel = panel
+
+  // Update tab buttons
+  document.querySelectorAll('.platform-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.platform === panel)
+  })
+
+  // Show/hide panels
+  elements.tasksPanel.hidden = panel !== 'tasks'
+  elements.linkedinPanel.hidden = panel !== 'linkedin'
+  elements.xPanel.hidden = panel !== 'x'
+}
+
+// ─── Connection Status ────────────────────────────────────
+
+function setStatus(state, title, subtitle) {
+  elements.statusPill.classList.toggle('is-checking', state === 'checking')
+  elements.statusPill.classList.toggle('is-offline', state === 'offline')
+  elements.statusText.textContent =
+    state === 'online' ? 'Connected' : state === 'offline' ? 'Offline' : 'Checking'
+  elements.heroTitle.textContent = title
+  elements.heroSubtitle.textContent = subtitle
+}
+
+async function checkConnection() {
+  setStatus('checking', 'Checking connection...', 'Verifying backend & auth')
 
   try {
-    const previousComment = selectedComment(item)
-    const endpoint = previousComment
-      ? `/api/extension/linkedin/regenerate/${encodeURIComponent(userId)}`
-      : `/api/extension/linkedin/comment/${encodeURIComponent(userId)}`
-    const data = await postJson(apiUrl(endpoint, settings), {
-      author: item.author,
-      post: item.post,
-      url: item.url,
-      previous_comment: previousComment,
-      provider: settings.aiProvider,
+    const status = await chrome.runtime.sendMessage({ type: 'ENGAGR_GET_STATUS' })
+
+    if (status.connected) {
+      setStatus('online', 'Connected to Engagr', `Backend ${status.backendReachable ? 'reachable' : 'unreachable'}`)
+
+      // Show auth info
+      elements.authInfo.hidden = false
+      elements.loginSection.hidden = true
+      elements.syncedUserId.textContent = maskUserId(status.userId)
+      elements.authMethod.textContent = status.authenticated ? 'JWT Token' : 'User ID'
+      elements.syncSummary.textContent = status.lastSync ? `Synced ${timeAgo(status.lastSync)}` : 'Synced'
+
+      // Update keywords
+      const settings = await loadSettings()
+      const kw = Array.isArray(settings.linkedinKeywords) ? settings.linkedinKeywords : []
+      elements.syncedKeywords.textContent = kw.length ? kw.slice(0, 4).join(', ') : '—'
+    } else {
+      setStatus('offline', 'Not connected', 'Login required')
+      elements.authInfo.hidden = true
+      elements.loginSection.hidden = false
+    }
+
+    // Update poll time
+    elements.lastPollTime.textContent = status.lastPoll ? `Poll: ${timeAgo(status.lastPoll)}` : 'Not polled'
+  } catch {
+    setStatus('offline', 'Connection error', 'Check your network')
+    elements.loginSection.hidden = false
+  }
+}
+
+// ─── Login Flow ───────────────────────────────────────────
+
+async function handleLogin() {
+  const code = elements.loginCodeInput.value.trim()
+  if (!code) {
+    showLoginError('Please enter a login code.')
+    return
+  }
+
+  elements.loginButton.disabled = true
+  elements.loginButton.textContent = '...'
+  elements.loginError.hidden = true
+
+  try {
+    const settings = await loadSettings()
+    const response = await chrome.runtime.sendMessage({
+      type: 'ENGAGR_EXTENSION_LOGIN',
+      payload: { code, apiBaseUrl: settings.apiBaseUrl },
     })
 
-    posts[index] = {
-      ...item,
-      aiComment: {
-        variants: data.variants || [data.comment].filter(Boolean),
-        selected_comment: data.selected_comment || data.comment || data.variants?.[0] || '',
-        post_language: data.post_language || 'en',
-        provider: data.provider || settings.aiProvider,
-      },
+    if (response.ok) {
+      elements.loginCodeInput.value = ''
+      await checkConnection()
+      await loadTasks()
+    } else {
+      showLoginError(response.error || 'Login failed.')
     }
+  } catch (err) {
+    showLoginError(err.message || 'Network error.')
+  }
 
-    await saveParsedPosts(posts, stored.linkedinParsedAt || new Date().toISOString())
-    if (!silent) elements.parserStatus.textContent = previousComment ? 'AI comment regenerated.' : 'AI comment generated.'
-    return true
-  } catch (error) {
-    if (!silent) elements.parserStatus.textContent = error.message || 'AI comment generation failed.'
-    return false
+  elements.loginButton.disabled = false
+  elements.loginButton.textContent = 'Connect'
+}
+
+function showLoginError(msg) {
+  elements.loginError.textContent = msg
+  elements.loginError.hidden = false
+}
+
+// ─── Tasks Loading ────────────────────────────────────────
+
+async function loadTasks() {
+  elements.actionsStatus.textContent = 'Loading approved tasks...'
+
+  try {
+    // Trigger poll
+    await chrome.runtime.sendMessage({ type: 'ENGAGR_POLL_TASKS' })
+
+    // Read from local storage
+    const stored = await chrome.storage.local.get(['pendingTasks', 'lastPollAt'])
+    pendingTasks = stored.pendingTasks || []
+
+    renderTasks()
+    updateTaskBadge(pendingTasks.length)
+
+    elements.actionsStatus.textContent = pendingTasks.length
+      ? `${pendingTasks.length} task${pendingTasks.length === 1 ? '' : 's'} ready for your browser.`
+      : 'No approved tasks. Approve items in the Mini App first.'
+  } catch (err) {
+    elements.actionsStatus.textContent = err.message || 'Failed to load tasks.'
   }
 }
 
-async function generateMissingComments(limit = 3) {
-  const stored = await chrome.storage.local.get(['linkedinParsedPosts'])
-  const posts = stored.linkedinParsedPosts || []
-  const indexes = posts
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !selectedComment(item))
-    .slice(0, limit)
-    .map(({ index }) => index)
+function renderTasks() {
+  elements.actionsCount.textContent = String(pendingTasks.length)
+  elements.approvedActions.hidden = pendingTasks.length === 0
 
-  for (const index of indexes) {
-    await generateAiComment(index, { silent: true })
-  }
-}
-
-
-async function enqueueReadyPosts(limit = 3) {
-  const settings = await loadSettings()
-  const userId = settings.telegramUserId.trim()
-  if (!userId) return { queued: 0, skipped: 0 }
-
-  const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinQueuedPostKeys'])
-  const alreadyQueued = new Set(stored.linkedinQueuedPostKeys || [])
-  const posts = (stored.linkedinParsedPosts || [])
-    .filter((post) => selectedComment(post))
-    .filter((post) => !alreadyQueued.has(post.url || `${post.author}:${post.post?.slice(0, 120)}`))
-    .slice(0, limit)
-
-  if (!posts.length) return { queued: 0, skipped: 0 }
-
-  const data = await postJson(apiUrl(`/api/extension/linkedin/queue/${encodeURIComponent(userId)}`, settings), { posts })
-  for (const post of posts) {
-    alreadyQueued.add(post.url || `${post.author}:${post.post?.slice(0, 120)}`)
-  }
-  await chrome.storage.local.set({ linkedinQueuedPostKeys: [...alreadyQueued] })
-  return data
-}
-
-
-let approvedActions = []
-
-function actionLabel(action) {
-  if (action === 'like') return 'Like'
-  if (action === 'connect') return 'Connect'
-  return 'Comment'
-}
-
-function renderApprovedActions() {
-  elements.actionsCount.textContent = String(approvedActions.length)
-  elements.approvedActions.hidden = approvedActions.length === 0
-
-  if (!approvedActions.length) {
+  if (!pendingTasks.length) {
     elements.approvedActions.innerHTML = ''
     return
   }
 
-  elements.approvedActions.innerHTML = approvedActions.slice(0, 5).map((item, index) => {
-    const comment = item.selected_comment || item.comment || ''
+  elements.approvedActions.innerHTML = pendingTasks.slice(0, 8).map((item, index) => {
+    const platform = item.platform || 'linkedin'
     const action = item.action || 'comment'
+    const comment = item.selected_comment || item.comment || ''
+    const excerpt = item.post_excerpt || item.post_text?.slice(0, 120) || item.topic || ''
 
     return `
-      <article class="parsed-post-card">
-        <span class="action-badge">${escapeHtml(actionLabel(action))}</span>
-        <strong>${escapeHtml(item.author || 'Unknown author')}</strong>
-        <p>${escapeHtml(item.post_excerpt || item.post_text || '')}</p>
-        ${comment ? `<div class="ai-comment"><span>Approved comment</span><p>${escapeHtml(comment)}</p></div>` : ''}
-        <div class="post-actions action-buttons">
-          <button type="button" class="mini-action" data-primary="true" data-execute-index="${index}">Open &amp; prepare</button>
-          <button type="button" class="mini-action" data-done="true" data-complete-index="${index}">Posted ✓</button>
-          <button type="button" class="mini-action" data-dismiss-index="${index}">Dismiss</button>
+      <article class="task-card">
+        <div style="display:flex;gap:4px;margin-bottom:4px;">
+          <span class="action-badge ${action}">${actionLabel(action)}</span>
+          <span class="platform-badge ${platform}">${platform === 'x' ? 'X' : 'LinkedIn'}</span>
+        </div>
+        <strong>${escapeHtml(item.author || item.topic || 'Task')}</strong>
+        <p>${escapeHtml(excerpt)}</p>
+        ${comment ? `<div class="ai-comment"><span>AI ${action === 'thread' ? 'Thread' : 'Comment'}</span><p>${escapeHtml(comment.slice(0, 200))}</p></div>` : ''}
+        <div class="post-actions">
+          <button type="button" class="mini-action" data-primary="true" data-execute-task="${index}">Open & Prepare</button>
+          <button type="button" class="mini-action" data-done="true" data-complete-task="${index}">Done ✓</button>
+          <button type="button" class="mini-action" data-dismiss-task="${index}">Skip</button>
         </div>
       </article>
     `
   }).join('')
 }
 
-async function loadApprovedActions({ silent = false } = {}) {
-  const settings = await loadSettings()
-  const userId = settings.telegramUserId.trim()
+function actionLabel(action) {
+  if (action === 'like') return 'Like'
+  if (action === 'thread') return 'Thread'
+  if (action === 'reply') return 'Reply'
+  if (action === 'connect') return 'Connect'
+  if (action === 'follow') return 'Follow'
+  return 'Comment'
+}
 
-  if (!userId) {
-    if (!silent) elements.actionsStatus.textContent = 'Open the Mini App once so the bridge can sync your Telegram user ID.'
+function updateTaskBadge(count) {
+  elements.taskBadge.textContent = String(count)
+  elements.taskBadge.hidden = count === 0
+}
+
+async function executeTask(index) {
+  const task = pendingTasks[index]
+  if (!task) return
+
+  const url = task.post_url || ''
+  if (!url) {
+    elements.actionsStatus.textContent = 'This task has no URL. Dismiss and retry.'
     return
   }
 
-  if (!silent) elements.actionsStatus.textContent = 'Loading approved actions…'
+  elements.actionsStatus.textContent = 'Opening page and preparing action...'
 
-  try {
-    const data = await getJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}`, settings))
-    approvedActions = Array.isArray(data?.actions) ? data.actions : []
-    renderApprovedActions()
-    elements.actionsStatus.textContent = approvedActions.length
-      ? `${approvedActions.length} approved action${approvedActions.length === 1 ? '' : 's'} ready for your browser.`
-      : 'No approved actions yet. Approve queue items in the Mini App first.'
-  } catch (error) {
-    if (!silent) elements.actionsStatus.textContent = error.message || 'Failed to load approved actions.'
-  }
-}
-
-function actionMessageFor(item) {
-  const action = item.action || 'comment'
-  const comment = item.selected_comment || item.comment || ''
-
-  if (action === 'like') {
-    return { type: 'ENGAGR_LIKE_POST', payload: { url: item.post_url } }
-  }
-
-  if (action === 'connect') {
-    return { type: 'ENGAGR_PREPARE_CONNECT', payload: { url: item.post_url, message: comment } }
-  }
-
-  return { type: 'ENGAGR_PREPARE_COMMENT', payload: { url: item.post_url, comment } }
-}
-
-async function executeApprovedAction(index) {
-  const item = approvedActions[index]
-  if (!item) return
-
-  if (!item.post_url) {
-    elements.actionsStatus.textContent = 'This item has no LinkedIn URL; dismiss it and re-scan.'
-    return
-  }
-
-  elements.actionsStatus.textContent = 'Opening LinkedIn and preparing the action…'
+  const actionMessage = buildActionMessage(task)
 
   try {
     const response = await chrome.runtime.sendMessage({
       type: 'ENGAGR_OPEN_AND_PREPARE',
-      payload: {
-        url: item.post_url,
-        actionMessage: actionMessageFor(item),
-      },
+      payload: { url, actionMessage },
     })
 
     elements.actionsStatus.textContent = response?.ok
-      ? response.note || 'Action prepared. Finish it manually in the LinkedIn tab.'
-      : response?.error || 'Could not prepare the action. Do it manually in the opened tab.'
+      ? response.note || 'Action prepared! Finish it manually in the tab.'
+      : response?.error || 'Could not prepare action. Do it manually.'
   } catch {
-    elements.actionsStatus.textContent = 'Could not reach the LinkedIn tab. Finish the action manually.'
+    elements.actionsStatus.textContent = 'Could not reach page. Try manually.'
   }
 }
 
-async function completeApprovedAction(index) {
-  const item = approvedActions[index]
-  if (!item) return
+function buildActionMessage(task) {
+  const platform = task.platform || 'linkedin'
+  const action = task.action || 'comment'
+  const comment = task.selected_comment || task.comment || ''
 
-  const settings = await loadSettings()
-  const userId = settings.telegramUserId.trim()
-  if (!userId) return
+  if (platform === 'x') {
+    if (action === 'like') return { type: 'ENGAGR_LIKE_X_TWEET' }
+    if (action === 'reply') return { type: 'ENGAGR_PREPARE_X_REPLY', payload: { comment, url: task.post_url } }
+    return { type: 'ENGAGR_PREPARE_X_REPLY', payload: { comment, url: task.post_url } }
+  }
+
+  // LinkedIn
+  if (action === 'like') return { type: 'ENGAGR_LIKE_POST', payload: { url: task.post_url } }
+  if (action === 'connect') return { type: 'ENGAGR_PREPARE_CONNECT', payload: { url: task.post_url, message: comment } }
+  return { type: 'ENGAGR_PREPARE_COMMENT', payload: { url: task.post_url, comment } }
+}
+
+async function completeTask(index) {
+  const task = pendingTasks[index]
+  if (!task) return
 
   try {
-    await postJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}/${encodeURIComponent(item.id)}/complete`, settings), {})
-    approvedActions.splice(index, 1)
-    renderApprovedActions()
-    elements.actionsStatus.textContent = 'Marked as posted. Stats updated in Engagr.'
-  } catch (error) {
-    elements.actionsStatus.textContent = error.message || 'Failed to mark the action as posted.'
+    await chrome.runtime.sendMessage({
+      type: 'ENGAGR_UPDATE_TASK_STATUS',
+      payload: { taskId: task.id, status: 'completed' },
+    })
+    pendingTasks.splice(index, 1)
+    renderTasks()
+    updateTaskBadge(pendingTasks.length)
+    elements.actionsStatus.textContent = 'Task marked as completed.'
+  } catch (err) {
+    elements.actionsStatus.textContent = err.message || 'Failed to update task.'
   }
 }
 
-async function dismissApprovedAction(index) {
-  const item = approvedActions[index]
-  if (!item) return
-
-  const settings = await loadSettings()
-  const userId = settings.telegramUserId.trim()
-  if (!userId) return
+async function dismissTask(index) {
+  const task = pendingTasks[index]
+  if (!task) return
 
   try {
-    await postJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}/${encodeURIComponent(item.id)}/dismiss`, settings), {})
-    approvedActions.splice(index, 1)
-    renderApprovedActions()
-    elements.actionsStatus.textContent = 'Action dismissed.'
-  } catch (error) {
-    elements.actionsStatus.textContent = error.message || 'Failed to dismiss the action.'
+    await chrome.runtime.sendMessage({
+      type: 'ENGAGR_UPDATE_TASK_STATUS',
+      payload: { taskId: task.id, status: 'dismissed' },
+    })
+    pendingTasks.splice(index, 1)
+    renderTasks()
+    updateTaskBadge(pendingTasks.length)
+    elements.actionsStatus.textContent = 'Task dismissed.'
+  } catch (err) {
+    elements.actionsStatus.textContent = err.message || 'Failed to dismiss.'
   }
 }
 
-async function scanLinkedInFeed({ auto = false } = {}) {
+// ─── LinkedIn Scanning ────────────────────────────────────
+
+async function scanLinkedInFeed() {
   elements.scanLinkedInButton.disabled = true
-  elements.parserStatus.textContent = auto ? 'Auto-scanning LinkedIn with Mini App settings…' : 'Scanning active LinkedIn tab…'
+  elements.parserStatus.textContent = 'Scanning LinkedIn feed...'
 
   try {
-    let settings = await loadSettings()
-    settings = await refreshMiniAppSettings(settings)
-    renderSettings(settings)
-
     const tab = await getActiveTab()
     if (!tab?.id || !isLinkedInUrl(tab.url)) {
-      elements.parserStatus.textContent = settings.telegramUserId
-        ? 'Open LinkedIn feed/search; Engagr will use your Mini App keywords.'
-        : 'Open Engagr Mini App once to auto-sync, then open LinkedIn.'
-      renderParsedPosts([])
+      elements.parserStatus.textContent = 'Open a LinkedIn page first, then scan.'
       return
     }
 
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'ENGAGR_PARSE_LINKEDIN_FEED' })
-    const parsedPosts = Array.isArray(response?.posts) ? response.posts : []
-    const posts = filterByKeywords(parsedPosts, settings.linkedinKeywords)
-    const parsedAt = response?.parsedAt || new Date().toISOString()
+    parsedLinkedInPosts = Array.isArray(response?.posts) ? response.posts : []
 
-    await saveParsedPosts(posts, parsedAt)
-
-    if (!posts.length) {
-      elements.parserStatus.textContent = settings.linkedinKeywords?.length
-        ? `No posts matched: ${settings.linkedinKeywords.slice(0, 3).join(', ')}. Scroll/search LinkedIn and scan again.`
-        : 'No feed posts found yet. Add keywords in Mini App or scroll LinkedIn and scan again.'
-      return
-    }
-
-    await generateMissingComments(3)
-    const queueResult = await enqueueReadyPosts(3)
-    elements.parserStatus.textContent = queueResult.queued > 0
-      ? `Queued ${queueResult.queued} post${queueResult.queued === 1 ? '' : 's'} for Mini App approval.`
-      : `Ready: ${posts.length} matched post${posts.length === 1 ? '' : 's'} from Mini App settings.`
+    renderLinkedInPosts()
+    elements.parserStatus.textContent = parsedLinkedInPosts.length
+      ? `Found ${parsedLinkedInPosts.length} post${parsedLinkedInPosts.length === 1 ? '' : 's'} in feed.`
+      : 'No posts found. Scroll the feed and scan again.'
   } catch {
-    elements.parserStatus.textContent = 'Parser is not ready. Reload the LinkedIn tab and try again.'
+    elements.parserStatus.textContent = 'Parser not ready. Reload LinkedIn tab and try again.'
   } finally {
     elements.scanLinkedInButton.disabled = false
   }
 }
 
-async function checkConnection(settings = null) {
-  let current = settings || await loadSettings()
-  current = await refreshMiniAppSettings(current)
-  renderSettings(current)
-  const miniAppUrl = normalizeUrl(current.miniAppUrl)
+function renderLinkedInPosts() {
+  elements.parserCount.textContent = String(parsedLinkedInPosts.length)
+  elements.parsedPosts.hidden = parsedLinkedInPosts.length === 0
 
-  setStatus('checking', 'Checking Mini App sync', 'Looking for your Engagr Mini App context')
+  elements.parsedPosts.innerHTML = parsedLinkedInPosts.slice(0, 5).map((item, idx) => `
+    <article class="parsed-post-card">
+      <strong>${escapeHtml(item.author || 'Unknown')}</strong>
+      <p>${escapeHtml(item.post || '')}</p>
+      <div class="post-actions">
+        <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noreferrer">Open</a>
+        <button type="button" class="mini-action" data-generate-li="${idx}">Generate AI</button>
+      </div>
+    </article>
+  `).join('')
+}
 
-  if (!current.telegramUserId) {
-    setStatus('offline', 'Mini App not synced', 'Open Engagr Mini App once; no extension form is needed')
-    return
-  }
+// ─── X/Twitter Scanning ───────────────────────────────────
+
+async function scanXFeed() {
+  elements.scanXButton.disabled = true
+  elements.xStatus.textContent = 'Scanning X/Twitter feed...'
 
   try {
-    await chrome.storage.sync.set({
-      miniAppUrl,
-      lastConnectionCheck: new Date().toISOString(),
-    })
+    const tab = await getActiveTab()
+    if (!tab?.id || !isXUrl(tab.url)) {
+      elements.xStatus.textContent = 'Open X/Twitter first, then scan.'
+      return
+    }
 
-    setStatus('online', 'Synced with Mini App', 'Browser bridge is using your Telegram settings')
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'ENGAGR_PARSE_X_FEED' })
+    parsedXTweets = Array.isArray(response?.posts) ? response.posts : []
+
+    renderXTweets()
+    elements.xStatus.textContent = parsedXTweets.length
+      ? `Found ${parsedXTweets.length} tweet${parsedXTweets.length === 1 ? '' : 's'} in feed.`
+      : 'No tweets found. Scroll the feed and scan again.'
   } catch {
-    setStatus('offline', 'Mini App sync unavailable', 'Open Engagr Mini App and try again')
+    elements.xStatus.textContent = 'Parser not ready. Reload X tab and try again.'
+  } finally {
+    elements.scanXButton.disabled = false
   }
 }
 
-elements.checkButton.addEventListener('click', () => checkConnection().then(() => scanLinkedInFeed({ auto: true })))
-elements.scanLinkedInButton.addEventListener('click', () => scanLinkedInFeed())
-elements.refreshActionsButton.addEventListener('click', () => loadApprovedActions())
-elements.approvedActions.addEventListener('click', (event) => {
-  const executeButton = event.target.closest('[data-execute-index]')
-  if (executeButton) {
-    executeApprovedAction(Number(executeButton.dataset.executeIndex))
+function renderXTweets() {
+  elements.xCount.textContent = String(parsedXTweets.length)
+  elements.parsedTweets.hidden = parsedXTweets.length === 0
+
+  elements.parsedTweets.innerHTML = parsedXTweets.slice(0, 5).map((item, idx) => `
+    <article class="parsed-post-card">
+      <strong>${escapeHtml(item.author || item.handle || 'Unknown')} ${item.handle ? `<span style="color:#6b7280;font-weight:400">${escapeHtml(item.handle)}</span>` : ''}</strong>
+      <p>${escapeHtml(item.post || '')}</p>
+      ${item.metrics ? `<div style="font-size:10px;color:#6b7280;">💬${item.metrics.replies || 0} 🔄${item.metrics.retweets || 0} ❤️${item.metrics.likes || 0}</div>` : ''}
+      <div class="post-actions">
+        ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">Open</a>` : ''}
+        <button type="button" class="mini-action" data-generate-x="${idx}">Generate Reply</button>
+      </div>
+    </article>
+  `).join('')
+}
+
+// ─── Tab Detection ────────────────────────────────────────
+
+async function getActiveTab() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'ENGAGR_GET_ACTIVE_TAB' }, (resp) => {
+      resolve(resp?.tab || null)
+    })
+  })
+}
+
+function isLinkedInUrl(url) {
+  return /^https?:\/\/(www\.)?linkedin\.com\//i.test(url || '')
+}
+
+function isXUrl(url) {
+  return /^https?:\/\/(www\.)?(x\.com|twitter\.com)\//i.test(url || '')
+}
+
+async function detectActiveTab() {
+  const tab = await getActiveTab()
+  if (isLinkedInUrl(tab?.url)) {
+    elements.activeTabLabel.textContent = 'LinkedIn tab detected'
+  } else if (isXUrl(tab?.url)) {
+    elements.activeTabLabel.textContent = 'X/Twitter tab detected'
+  } else {
+    elements.activeTabLabel.textContent = 'Ready for workflows'
+  }
+}
+
+// ─── AI Comment Generation ────────────────────────────────
+
+async function generateLinkedInComment(index) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId
+  if (!userId) {
+    elements.parserStatus.textContent = 'Connect to Engagr first.'
     return
   }
 
-  const completeButton = event.target.closest('[data-complete-index]')
-  if (completeButton) {
-    completeApprovedAction(Number(completeButton.dataset.completeIndex))
+  const item = parsedLinkedInPosts[index]
+  if (!item) return
+
+  elements.parserStatus.textContent = 'Generating AI comment...'
+
+  try {
+    const data = await fetchJson(apiUrl(`/api/extension/linkedin/comment/${encodeURIComponent(userId)}`, settings), {
+      method: 'POST',
+      body: JSON.stringify({
+        author: item.author,
+        post: item.post,
+        url: item.url,
+      }),
+    })
+
+    parsedLinkedInPosts[index] = {
+      ...item,
+      aiComment: {
+        variants: data.variants || [data.comment],
+        selected_comment: data.selected_comment || data.comment || '',
+      },
+    }
+    renderLinkedInPosts()
+    elements.parserStatus.textContent = 'AI comment generated.'
+  } catch (err) {
+    elements.parserStatus.textContent = err.message || 'Generation failed.'
+  }
+}
+
+async function generateXReply(index) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId
+  if (!userId) {
+    elements.xStatus.textContent = 'Connect to Engagr first.'
     return
   }
 
-  const dismissButton = event.target.closest('[data-dismiss-index]')
-  if (dismissButton) {
-    dismissApprovedAction(Number(dismissButton.dataset.dismissIndex))
+  const item = parsedXTweets[index]
+  if (!item) return
+
+  elements.xStatus.textContent = 'Generating AI reply...'
+
+  try {
+    const data = await fetchJson(apiUrl(`/api/x/${encodeURIComponent(userId)}/generate-reply`, settings), {
+      method: 'POST',
+      body: JSON.stringify({
+        post_text: item.post,
+        post_author: item.handle || item.author,
+        post_url: item.url,
+        language: 'en',
+      }),
+    })
+
+    parsedXTweets[index] = {
+      ...item,
+      aiReply: {
+        variants: data.variants || [data.selected_comment],
+        selected_comment: data.selected_comment || data.variants?.[0] || '',
+      },
+    }
+    renderXTweets()
+    elements.xStatus.textContent = 'AI reply generated.'
+  } catch (err) {
+    elements.xStatus.textContent = err.message || 'Generation failed.'
+  }
+}
+
+// ─── Event Listeners ──────────────────────────────────────
+
+// Platform tabs
+elements.platformTabs.addEventListener('click', (e) => {
+  const btn = e.target.closest('.platform-tab')
+  if (btn?.dataset.platform) {
+    switchPanel(btn.dataset.platform)
   }
 })
-elements.parsedPosts.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-generate-index]')
-  if (!button) return
-  generateAiComment(Number(button.dataset.generateIndex))
+
+// Check connection
+elements.checkButton.addEventListener('click', () => {
+  checkConnection()
 })
+
+// Poll tasks
+elements.pollTasksButton.addEventListener('click', () => {
+  loadTasks()
+})
+
+// Login
+elements.loginButton.addEventListener('click', handleLogin)
+elements.loginCodeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleLogin()
+})
+
+// LinkedIn scan
+elements.scanLinkedInButton.addEventListener('click', scanLinkedInFeed)
+
+// X scan
+elements.scanXButton.addEventListener('click', scanXFeed)
+
+// Task actions (event delegation)
+elements.approvedActions.addEventListener('click', (e) => {
+  const execBtn = e.target.closest('[data-execute-task]')
+  if (execBtn) { executeTask(Number(execBtn.dataset.executeTask)); return }
+
+  const doneBtn = e.target.closest('[data-complete-task]')
+  if (doneBtn) { completeTask(Number(doneBtn.dataset.completeTask)); return }
+
+  const dismissBtn = e.target.closest('[data-dismiss-task]')
+  if (dismissBtn) { dismissTask(Number(dismissBtn.dataset.dismissTask)); return }
+})
+
+// LinkedIn AI generation (event delegation)
+elements.parsedPosts.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-generate-li]')
+  if (btn) generateLinkedInComment(Number(btn.dataset.generateLi))
+})
+
+// X AI generation (event delegation)
+elements.parsedTweets.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-generate-x]')
+  if (btn) generateXReply(Number(btn.dataset.generateX))
+})
+
+// ─── Initialization ───────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-  let settings = await loadSettings()
-  settings = await refreshMiniAppSettings(settings)
-  renderSettings(settings)
-  await renderActiveTab()
-  await loadParsedPosts()
-  await checkConnection(settings)
-  await loadApprovedActions({ silent: true })
+  await detectActiveTab()
+  await checkConnection()
+  await loadTasks()
 
-  const tab = await getActiveTab().catch(() => null)
-  if (settings.autoScanLinkedIn && isLinkedInUrl(tab?.url)) {
-    await scanLinkedInFeed({ auto: true })
+  // Auto-switch to relevant panel based on active tab
+  const tab = await getActiveTab()
+  if (isLinkedInUrl(tab?.url)) {
+    switchPanel('linkedin')
+  } else if (isXUrl(tab?.url)) {
+    switchPanel('x')
   }
 })
