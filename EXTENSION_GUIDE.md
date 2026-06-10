@@ -54,7 +54,7 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 - [x] AI comment generation/regeneration for parsed LinkedIn posts.
 - [x] Automatic Mini App sync for user ID, API URL, and LinkedIn keywords.
 - [x] Send parsed posts to the Mini App approval queue.
-- [ ] Prepare approved LinkedIn comment action.
+- [x] Prepare approved LinkedIn comment action.
 
 ## Chrome Web Store release checklist
 

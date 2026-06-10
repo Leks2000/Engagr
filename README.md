@@ -183,13 +183,13 @@ Engagr WebBridge]
 | 3. AI Comments | ✅ Done | Use current Groq provider flow, generate/regenerate comment | Parsed LinkedIn post → AI comment variants are saved in the extension preview |
 | 4. Mini App | ✅ Done | Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings | Control center with platform cards, planned modules, and settings |
 | 5. Approval Queue | ✅ Done | Approve, edit, skip, regenerate, receive extension-found posts | Human-reviewed queue populated from WebBridge scans |
-| 6. LinkedIn Actions | ⏳ Planned | Insert prepared comment, like, connect, connect message | Manual final publish flow |
-| 7. Reddit | ⏳ Later | Search posts/subreddits, comments, upvote | Reddit workflow parity |
-| 8. User Memory | ⏳ Later | Project, audience, goal, tone profile | Personalized comments |
+| 6. LinkedIn Actions | ✅ Done | Insert prepared comment, like, connect, connect message | Extension content script prepares actions; user clicks final publish |
+| 7. Reddit | ✅ Done | Search posts/subreddits, comments, upvote | Public feed discovery, AI comments, queue, semi-auto & API-based posting |
+| 8. User Memory | ⏳ In Progress | Project, audience, goal, tone profile | Personalized comments |
 | 9. Ideas Engine | ⏳ Later | AI/dev/startup news collection | Content ideas and comment ideas |
 | 10. X / Twitter | ⏳ Later | Trends, replies, post ideas, threads | X workflow parity |
 
-The immediate MVP target is steps 1–6: open Telegram, review a found post, approve or edit the generated answer, open LinkedIn, and let the extension prepare the browser-side action while you decide the final submit. Steps 1–5 are complete; the current next task is Step 6, LinkedIn browser-side actions.
+Steps 1–7 are complete. The extension handles LinkedIn browser-side actions (comment insertion, like, connect with invite note), and Reddit workflow includes public discovery, AI comment generation, semi-auto queue, and API-based posting/upvoting. The current next task is Step 8: User Memory — a personalization layer that stores project context, target audience, goals, and tone profile to generate more relevant AI comments.
 
 See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) and [`extension/README.md`](extension/README.md) for local installation and release notes.
 
