@@ -4,7 +4,10 @@ const DEFAULT_SETTINGS = {
   telegramUserId: '',
   aiProvider: 'groq',
   autoOpenLinkedIn: true,
+  autoScanLinkedIn: true,
   lastConnectionCheck: null,
+  lastMiniAppSync: null,
+  linkedinKeywords: [],
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -29,6 +32,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         tab: tab ? { id: tab.id, url: tab.url, title: tab.title } : null,
       })
     })
+    return true
+  }
+
+  if (message?.type === 'ENGAGR_SYNC_MINI_APP_CONTEXT') {
+    const payload = message.payload || {}
+    const miniAppUrl = typeof payload.miniAppUrl === 'string' ? payload.miniAppUrl : ''
+    const apiBaseUrl = typeof payload.apiBaseUrl === 'string' ? payload.apiBaseUrl : ''
+    const telegramUserId = String(payload.userId || payload.telegramUserId || '').trim()
+    const linkedinKeywords = Array.isArray(payload.linkedin?.keywords) ? payload.linkedin.keywords : []
+
+    chrome.storage.sync.set({
+      ...(miniAppUrl ? { miniAppUrl } : {}),
+      ...(apiBaseUrl ? { apiBaseUrl } : {}),
+      ...(telegramUserId ? { telegramUserId } : {}),
+      linkedinKeywords,
+      lastMiniAppSync: new Date().toISOString(),
+    }, () => sendResponse({ ok: true }))
     return true
   }
 

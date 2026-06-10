@@ -9,6 +9,7 @@ import Dashboard from './screens/Dashboard'
 import LinkedInSettings from './screens/LinkedInSettings'
 import RedditSettings from './screens/RedditSettings'
 import Queue from './screens/Queue'
+import ControlCenter from './screens/ControlCenter'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -65,19 +66,19 @@ export const api = {
 
 export const translations = {
   en: {
-    dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue',
+    dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue', more: 'More',
     loading: 'Loading...', appName: 'Engagr',
   },
   ru: {
-    dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь',
+    dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь', more: 'Ещё',
     loading: 'Загрузка...', appName: 'Engagr',
   },
   es: {
-    dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola',
+    dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola', more: 'Más',
     loading: 'Cargando...', appName: 'Engagr',
   },
   de: {
-    dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange',
+    dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange', more: 'Mehr',
     loading: 'Laden...', appName: 'Engagr',
   },
 }
@@ -87,6 +88,7 @@ const NAV_ITEMS = [
   { id: 'linkedin', labelKey: 'linkedin', icon: LinkedInIcon },
   { id: 'reddit', labelKey: 'reddit', icon: RedditIcon },
   { id: 'queue', labelKey: 'queue', icon: QueueIcon },
+  { id: 'more', labelKey: 'more', icon: MoreIcon },
 ]
 
 function App() {
@@ -142,6 +144,23 @@ function App() {
   useEffect(() => {
     if (webAppReady) loadSettings()
   }, [webAppReady])
+  useEffect(() => {
+    if (!settings) return
+
+    window.postMessage({
+      source: 'ENGAGR_MINI_APP',
+      type: 'ENGAGR_MINI_APP_CONTEXT',
+      payload: {
+        userId,
+        apiBaseUrl: API_BASE,
+        miniAppUrl: window.location.origin,
+        language,
+        linkedin: settings.linkedin || {},
+        reddit: settings.reddit || {},
+      },
+    }, window.location.origin)
+  }, [settings, language])
+
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -185,6 +204,7 @@ function App() {
             {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
+            {screen === 'more' && <div className="page-transition"><ControlCenter userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -212,6 +232,7 @@ function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3
 function LinkedInIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><path d="M2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg> }
 function RedditIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M8 17c2.667 1 5.333 1 8 0"/><path d="M5 12c0-3 3-5 7-5s7 2 7 5-3 6-7 6-7-3-7-6Z"/><path d="M15 7l1-4 3 1"/><circle cx="19" cy="10" r="1"/><circle cx="5" cy="10" r="1"/></svg> }
 function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M9 12h6"/><path d="M9 16h6"/></svg> }
+function MoreIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg> }
 
 export default App
 export { userId }

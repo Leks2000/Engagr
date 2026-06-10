@@ -4,7 +4,10 @@ const DEFAULT_SETTINGS = {
   telegramUserId: '',
   aiProvider: 'groq',
   autoOpenLinkedIn: true,
+  autoScanLinkedIn: true,
   lastConnectionCheck: null,
+  lastMiniAppSync: null,
+  linkedinKeywords: [],
 }
 
 const elements = {
@@ -13,17 +16,14 @@ const elements = {
   statusText: document.querySelector('#statusText'),
   heroTitle: document.querySelector('#heroTitle'),
   heroSubtitle: document.querySelector('#heroSubtitle'),
-  miniAppUrl: document.querySelector('#miniAppUrl'),
-  apiBaseUrl: document.querySelector('#apiBaseUrl'),
-  telegramUserId: document.querySelector('#telegramUserId'),
-  aiProvider: document.querySelector('#aiProvider'),
-  autoOpenLinkedIn: document.querySelector('#autoOpenLinkedIn'),
-  saveButton: document.querySelector('#saveButton'),
   checkButton: document.querySelector('#checkButton'),
   scanLinkedInButton: document.querySelector('#scanLinkedInButton'),
   parserStatus: document.querySelector('#parserStatus'),
   parserCount: document.querySelector('#parserCount'),
   parsedPosts: document.querySelector('#parsedPosts'),
+  syncSummary: document.querySelector('#syncSummary'),
+  syncedUserId: document.querySelector('#syncedUserId'),
+  syncedKeywords: document.querySelector('#syncedKeywords'),
 }
 
 const storageKeys = Object.keys(DEFAULT_SETTINGS)
@@ -44,25 +44,20 @@ async function loadSettings() {
   return { ...DEFAULT_SETTINGS, ...stored }
 }
 
-async function saveSettings() {
-  const settings = {
-    miniAppUrl: normalizeUrl(elements.miniAppUrl.value),
-    apiBaseUrl: normalizeUrl(elements.apiBaseUrl.value, DEFAULT_SETTINGS.apiBaseUrl),
-    telegramUserId: elements.telegramUserId.value.trim(),
-    aiProvider: elements.aiProvider.value,
-    autoOpenLinkedIn: elements.autoOpenLinkedIn.checked,
-  }
-
-  await chrome.storage.sync.set(settings)
-  await checkConnection(settings)
+function maskUserId(userId) {
+  const value = String(userId || '').trim()
+  if (!value) return 'Not synced'
+  if (value.length <= 4) return value
+  return `${value.slice(0, 2)}…${value.slice(-3)}`
 }
 
 function renderSettings(settings) {
-  elements.miniAppUrl.value = settings.miniAppUrl
-  elements.apiBaseUrl.value = settings.apiBaseUrl
-  elements.telegramUserId.value = settings.telegramUserId
-  elements.aiProvider.value = settings.aiProvider
-  elements.autoOpenLinkedIn.checked = Boolean(settings.autoOpenLinkedIn)
+  const keywords = Array.isArray(settings.linkedinKeywords) ? settings.linkedinKeywords.filter(Boolean) : []
+  elements.syncedUserId.textContent = maskUserId(settings.telegramUserId)
+  elements.syncedKeywords.textContent = keywords.length ? keywords.slice(0, 5).join(', ') : 'No LinkedIn keywords selected'
+  elements.syncSummary.textContent = settings.telegramUserId
+    ? `Synced automatically${settings.lastMiniAppSync ? ` · ${new Date(settings.lastMiniAppSync).toLocaleTimeString()}` : ''}`
+    : 'Open Engagr Mini App once and the bridge will connect automatically.'
 }
 
 function setStatus(state, title, subtitle) {
@@ -91,7 +86,6 @@ async function renderActiveTab() {
   }
 }
 
-
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -109,8 +103,8 @@ function renderParsedPosts(posts = [], parsedAt = null) {
   elements.parserCount.textContent = String(posts.length)
   elements.parsedPosts.hidden = posts.length === 0
   elements.parserStatus.textContent = posts.length
-    ? `Parsed ${posts.length} post${posts.length === 1 ? '' : 's'}${parsedAt ? ' from current feed.' : '.'}`
-    : 'Scan the open LinkedIn feed for posts.'
+    ? `Parsed ${posts.length} relevant post${posts.length === 1 ? '' : 's'}${parsedAt ? ' from current feed.' : '.'}`
+    : 'Open LinkedIn; Engagr will scan using Mini App settings.'
 
   elements.parsedPosts.innerHTML = posts.slice(0, 5).map((item, index) => {
     const comment = selectedComment(item)
@@ -136,7 +130,6 @@ async function loadParsedPosts() {
   renderParsedPosts(stored.linkedinParsedPosts || [], stored.linkedinParsedAt || null)
 }
 
-
 async function saveParsedPosts(posts, parsedAt = new Date().toISOString()) {
   await chrome.storage.local.set({
     linkedinParsedPosts: posts,
@@ -147,6 +140,13 @@ async function saveParsedPosts(posts, parsedAt = new Date().toISOString()) {
 
 function apiUrl(path, settings) {
   return `${normalizeUrl(settings.apiBaseUrl, DEFAULT_SETTINGS.apiBaseUrl)}${path}`
+}
+
+async function getJson(url) {
+  const response = await fetch(url)
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || `API error: ${response.status}`)
+  return data
 }
 
 async function postJson(url, body) {
@@ -164,21 +164,52 @@ async function postJson(url, body) {
   return data
 }
 
-async function generateAiComment(index) {
+async function refreshMiniAppSettings(settings) {
+  const userId = settings.telegramUserId.trim()
+  if (!userId) return settings
+
+  try {
+    const data = await getJson(apiUrl(`/api/settings/${encodeURIComponent(userId)}`, settings))
+    const linkedinKeywords = Array.isArray(data?.linkedin?.keywords) ? data.linkedin.keywords : settings.linkedinKeywords
+    const next = {
+      linkedinKeywords,
+      aiProvider: settings.aiProvider || DEFAULT_SETTINGS.aiProvider,
+    }
+    await chrome.storage.sync.set(next)
+    return { ...settings, ...next }
+  } catch {
+    return settings
+  }
+}
+
+function filterByKeywords(posts, keywords) {
+  const normalized = (keywords || [])
+    .map((keyword) => String(keyword || '').trim().toLowerCase())
+    .filter(Boolean)
+
+  if (!normalized.length) return posts
+
+  return posts.filter((post) => {
+    const text = `${post.author || ''} ${post.post || ''}`.toLowerCase()
+    return normalized.some((keyword) => text.includes(keyword))
+  })
+}
+
+async function generateAiComment(index, { silent = false } = {}) {
   const settings = await loadSettings()
   const userId = settings.telegramUserId.trim()
 
   if (!userId) {
-    elements.parserStatus.textContent = 'Set Telegram user ID before generating AI comments.'
-    return
+    if (!silent) elements.parserStatus.textContent = 'Open the Mini App once so the bridge can sync your Telegram user ID.'
+    return false
   }
 
   const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinParsedAt'])
   const posts = stored.linkedinParsedPosts || []
   const item = posts[index]
-  if (!item) return
+  if (!item) return false
 
-  elements.parserStatus.textContent = item.aiComment ? 'Regenerating AI comment…' : 'Generating AI comment…'
+  if (!silent) elements.parserStatus.textContent = item.aiComment ? 'Regenerating AI comment…' : 'Generating AI comment…'
 
   try {
     const previousComment = selectedComment(item)
@@ -204,33 +235,89 @@ async function generateAiComment(index) {
     }
 
     await saveParsedPosts(posts, stored.linkedinParsedAt || new Date().toISOString())
-    elements.parserStatus.textContent = previousComment ? 'AI comment regenerated.' : 'AI comment generated.'
+    if (!silent) elements.parserStatus.textContent = previousComment ? 'AI comment regenerated.' : 'AI comment generated.'
+    return true
   } catch (error) {
-    elements.parserStatus.textContent = error.message || 'AI comment generation failed.'
+    if (!silent) elements.parserStatus.textContent = error.message || 'AI comment generation failed.'
+    return false
   }
 }
 
-async function scanLinkedInFeed() {
+async function generateMissingComments(limit = 3) {
+  const stored = await chrome.storage.local.get(['linkedinParsedPosts'])
+  const posts = stored.linkedinParsedPosts || []
+  const indexes = posts
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !selectedComment(item))
+    .slice(0, limit)
+    .map(({ index }) => index)
+
+  for (const index of indexes) {
+    await generateAiComment(index, { silent: true })
+  }
+}
+
+
+async function enqueueReadyPosts(limit = 3) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId.trim()
+  if (!userId) return { queued: 0, skipped: 0 }
+
+  const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinQueuedPostKeys'])
+  const alreadyQueued = new Set(stored.linkedinQueuedPostKeys || [])
+  const posts = (stored.linkedinParsedPosts || [])
+    .filter((post) => selectedComment(post))
+    .filter((post) => !alreadyQueued.has(post.url || `${post.author}:${post.post?.slice(0, 120)}`))
+    .slice(0, limit)
+
+  if (!posts.length) return { queued: 0, skipped: 0 }
+
+  const data = await postJson(apiUrl(`/api/extension/linkedin/queue/${encodeURIComponent(userId)}`, settings), { posts })
+  for (const post of posts) {
+    alreadyQueued.add(post.url || `${post.author}:${post.post?.slice(0, 120)}`)
+  }
+  await chrome.storage.local.set({ linkedinQueuedPostKeys: [...alreadyQueued] })
+  return data
+}
+
+
+async function scanLinkedInFeed({ auto = false } = {}) {
   elements.scanLinkedInButton.disabled = true
-  elements.parserStatus.textContent = 'Scanning active LinkedIn tab…'
+  elements.parserStatus.textContent = auto ? 'Auto-scanning LinkedIn with Mini App settings…' : 'Scanning active LinkedIn tab…'
 
   try {
+    let settings = await loadSettings()
+    settings = await refreshMiniAppSettings(settings)
+    renderSettings(settings)
+
     const tab = await getActiveTab()
     if (!tab?.id || !isLinkedInUrl(tab.url)) {
-      elements.parserStatus.textContent = 'Open LinkedIn feed first, then scan again.'
+      elements.parserStatus.textContent = settings.telegramUserId
+        ? 'Open LinkedIn feed/search; Engagr will use your Mini App keywords.'
+        : 'Open Engagr Mini App once to auto-sync, then open LinkedIn.'
       renderParsedPosts([])
       return
     }
 
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'ENGAGR_PARSE_LINKEDIN_FEED' })
-    const posts = Array.isArray(response?.posts) ? response.posts : []
+    const parsedPosts = Array.isArray(response?.posts) ? response.posts : []
+    const posts = filterByKeywords(parsedPosts, settings.linkedinKeywords)
     const parsedAt = response?.parsedAt || new Date().toISOString()
 
     await saveParsedPosts(posts, parsedAt)
 
     if (!posts.length) {
-      elements.parserStatus.textContent = 'No feed posts found yet. Scroll LinkedIn and scan again.'
+      elements.parserStatus.textContent = settings.linkedinKeywords?.length
+        ? `No posts matched: ${settings.linkedinKeywords.slice(0, 3).join(', ')}. Scroll/search LinkedIn and scan again.`
+        : 'No feed posts found yet. Add keywords in Mini App or scroll LinkedIn and scan again.'
+      return
     }
+
+    await generateMissingComments(3)
+    const queueResult = await enqueueReadyPosts(3)
+    elements.parserStatus.textContent = queueResult.queued > 0
+      ? `Queued ${queueResult.queued} post${queueResult.queued === 1 ? '' : 's'} for Mini App approval.`
+      : `Ready: ${posts.length} matched post${posts.length === 1 ? '' : 's'} from Mini App settings.`
   } catch {
     elements.parserStatus.textContent = 'Parser is not ready. Reload the LinkedIn tab and try again.'
   } finally {
@@ -239,35 +326,32 @@ async function scanLinkedInFeed() {
 }
 
 async function checkConnection(settings = null) {
-  const current = settings || await loadSettings()
+  let current = settings || await loadSettings()
+  current = await refreshMiniAppSettings(current)
+  renderSettings(current)
   const miniAppUrl = normalizeUrl(current.miniAppUrl)
 
-  setStatus('checking', 'Checking Mini App', 'Looking for your Engagr control center')
+  setStatus('checking', 'Checking Mini App sync', 'Looking for your Engagr Mini App context')
+
+  if (!current.telegramUserId) {
+    setStatus('offline', 'Mini App not synced', 'Open Engagr Mini App once; no extension form is needed')
+    return
+  }
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
-    const response = await fetch(miniAppUrl, {
-      method: 'GET',
-      mode: 'no-cors',
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
-
     await chrome.storage.sync.set({
       miniAppUrl,
       lastConnectionCheck: new Date().toISOString(),
     })
 
-    setStatus('online', 'Desktop client connected', response ? 'Browser assistant is ready' : 'Mini App endpoint reached')
+    setStatus('online', 'Synced with Mini App', 'Browser bridge is using your Telegram settings')
   } catch {
-    setStatus('offline', 'Mini App not reachable', 'Start the Mini App or update the URL')
+    setStatus('offline', 'Mini App sync unavailable', 'Open Engagr Mini App and try again')
   }
 }
 
-elements.saveButton.addEventListener('click', saveSettings)
-elements.checkButton.addEventListener('click', () => checkConnection())
-elements.scanLinkedInButton.addEventListener('click', scanLinkedInFeed)
+elements.checkButton.addEventListener('click', () => checkConnection().then(() => scanLinkedInFeed({ auto: true })))
+elements.scanLinkedInButton.addEventListener('click', () => scanLinkedInFeed())
 elements.parsedPosts.addEventListener('click', (event) => {
   const button = event.target.closest('[data-generate-index]')
   if (!button) return
@@ -275,9 +359,15 @@ elements.parsedPosts.addEventListener('click', (event) => {
 })
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const settings = await loadSettings()
+  let settings = await loadSettings()
+  settings = await refreshMiniAppSettings(settings)
   renderSettings(settings)
   await renderActiveTab()
   await loadParsedPosts()
   await checkConnection(settings)
+
+  const tab = await getActiveTab().catch(() => null)
+  if (settings.autoScanLinkedIn && isLinkedInUrl(tab?.url)) {
+    await scanLinkedInFeed({ auto: true })
+  }
 })
