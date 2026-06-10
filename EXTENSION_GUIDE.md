@@ -54,7 +54,8 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 - [x] Settings saved via `chrome.storage.sync`.
 - [x] Mini App connection check.
 - [x] Active LinkedIn tab detection.
-- [ ] LinkedIn feed parser.
+- [x] LinkedIn feed parser.
+- [x] AI comment generation/regeneration for parsed LinkedIn posts.
 - [ ] Send parsed posts to the Mini App approval queue.
 - [ ] Prepare approved LinkedIn comment action.
 
