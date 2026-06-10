@@ -141,6 +141,82 @@ engagr/
 
 ---
 
+
+## Personal MVP Architecture (Extension-first)
+
+This project is moving toward a **personal, local-first AI Social Copilot MVP**. For the next build stage, the Chrome Extension is the main runtime and the Telegram Mini App is the control surface. Backend, database, Docker, multi-user auth, and multi-account infrastructure are intentionally out of scope until the extension workflow is useful every day.
+
+```mermaid
+flowchart TD
+    U[You] --> TMA[Telegram Mini App
+Dashboard / Queue / Settings]
+    U --> EXT[Chrome Extension
+Popup + Content Scripts]
+
+    TMA -. future local bridge / shared state .-> EXT
+    EXT --> STORE[(chrome.storage.local
+settings, queue, memory)]
+    EXT --> AI[Groq / OpenAI API
+comment generation]
+
+    EXT --> LI[LinkedIn Worker
+parse feed, insert comment, like, connect]
+    EXT --> RD[Reddit Worker
+parse posts, comment, upvote]
+    EXT --> XW[X / Twitter Worker
+trends, replies, post ideas, threads]
+
+    LI --> Q[Approval Queue
+Approve / Skip / Regenerate]
+    RD --> Q
+    XW --> Q
+    AI --> Q
+
+    Q -->|approved| EXT
+    EXT -->|DOM actions after approval| LI
+    EXT -->|DOM actions after approval| RD
+    EXT -->|DOM actions after approval| XW
+```
+
+### MVP 10 Steps
+
+| Step | Status | Goal | Result |
+|------|--------|------|--------|
+| 1. Extension | ⬜ Planned | Manifest V3, popup UI, settings, `chrome.storage`, connection/status check. | Extension v0.1 loads and shows connected/ready state. |
+| 2. LinkedIn Parser | ⬜ Planned | Read LinkedIn feed posts: author, text, URL. | `{ author, post, url }` objects collected from the page. |
+| 3. AI Comments | ⬜ Planned | Connect Groq/OpenAI, generate comments, regenerate variants. | Each parsed post can receive an AI comment draft. |
+| 4. Mini App | ⬜ Planned | Control center with Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings. | A single UI for reviewing work and settings. |
+| 5. Approval Queue | ⬜ Planned | Approve, Skip, Regenerate flow before any action. | AI drafts wait for your decision. |
+| 6. LinkedIn Actions | ⬜ Planned | Insert comments, like posts, prepare connect messages. | Approve → extension opens LinkedIn → draft is inserted. |
+| 7. Reddit | ⬜ Later | Repeat parser, comments, queue, upvote flow for Reddit. | Reddit opportunities enter the same queue. |
+| 8. User Memory | ⬜ Later | Store project, audience, goal, tone, interaction history. | More personalized comments and recommendations. |
+| 9. Ideas Engine | ⬜ Later | Collect AI/dev/startup news and generate content ideas. | 5 posts, 3 threads, 10 comment ideas. |
+| 10. X / Twitter | ⬜ Later | Trends, replies, post ideas, threads. | X becomes a third platform module. |
+
+### MVP to build now
+
+The first usable MVP is only steps **1–6**:
+
+```text
+Open Telegram / extension UI
+↓
+See a LinkedIn post opportunity
+↓
+AI generates a comment
+↓
+Approve / Skip / Regenerate
+↓
+Extension opens LinkedIn
+↓
+Extension inserts the approved comment draft
+↓
+You make the final publish decision
+```
+
+See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) for the planned local setup, loading, and Chrome Web Store release checklist.
+
+---
+
 ## Semi-Auto Workflow (Queue Card Actions)
 
 Each post in the queue shows:
