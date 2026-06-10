@@ -168,6 +168,13 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
       status: t.ready,
       tone: 'memory',
     },
+    {
+      id: 'ideas',
+      title: t.ideas,
+      text: t.ideasText,
+      status: t.ready,
+      tone: 'ideas',
+    },
   ]), [settings, t])
 
   const save = async (field, payload) => {
@@ -210,7 +217,6 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
       <SectionTitle>{t.comingNext}</SectionTitle>
       <div className="grid grid-cols-1 gap-3 mb-5">
         <RoadmapCard title={t.x} text={t.xText} badge={t.planned} />
-        <RoadmapCard title={t.ideas} text={t.ideasText} badge={t.planned} />
       </div>
 
       <SectionTitle>{t.settings}</SectionTitle>

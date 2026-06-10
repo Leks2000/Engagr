@@ -35,6 +35,7 @@ import invite_generator
 import daily_digest
 import ai_comment
 import user_memory
+import ideas_engine
 
 # ── Logging ───────────────────────────────────────────
 
@@ -1403,6 +1404,72 @@ def send_digest_now(user_id):
             daily_digest.send_daily_digest(user_id), _loop
         )
         return jsonify({"status": "sending"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Ideas Engine Endpoints ─────────────────────────────
+
+@api.route("/api/ideas/<user_id>", methods=["GET"])
+def get_ideas(user_id):
+    """Get personalized content and comment ideas."""
+    try:
+        force = request.args.get("refresh", "").lower() in ("1", "true")
+        limit = int(request.args.get("limit", 15))
+        ideas = ideas_engine.get_ideas(user_id, force_refresh=force, limit=limit)
+        return jsonify({"ideas": ideas, "count": len(ideas)})
+    except Exception as e:
+        logger.error("Ideas fetch failed user=%s: %s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/ideas/<user_id>/categories", methods=["GET"])
+def get_ideas_categories(user_id):
+    """Get ideas grouped by category."""
+    try:
+        categories = ideas_engine.get_idea_categories(user_id)
+        return jsonify(categories)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/ideas/<user_id>/generate-comment", methods=["POST"])
+def generate_comment_for_idea(user_id):
+    """Generate AI comment for a specific idea."""
+    try:
+        data = request.json or {}
+        idea_id = data.get("idea_id", "")
+        platform = data.get("platform", "linkedin")
+        result = ideas_engine.generate_comment_for_idea(user_id, idea_id, platform)
+        if "error" in result and not result.get("variants"):
+            return jsonify(result), 404
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/ideas/<user_id>/save-to-queue", methods=["POST"])
+def save_idea_to_queue(user_id):
+    """Save an idea with comment to the approval queue."""
+    try:
+        data = request.json or {}
+        idea_id = data.get("idea_id", "")
+        comment = data.get("comment", "")
+        platform = data.get("platform", "linkedin")
+        result = ideas_engine.save_idea_to_queue(user_id, idea_id, comment, platform)
+        if "error" in result:
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/ideas/<user_id>/stats", methods=["GET"])
+def get_ideas_stats(user_id):
+    """Get ideas engine stats."""
+    try:
+        stats = ideas_engine.get_ideas_stats(user_id)
+        return jsonify(stats)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

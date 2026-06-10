@@ -11,6 +11,7 @@ import RedditSettings from './screens/RedditSettings'
 import Queue from './screens/Queue'
 import ControlCenter from './screens/ControlCenter'
 import UserMemory from './screens/UserMemory'
+import IdeasEngine from './screens/IdeasEngine'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -206,6 +207,7 @@ function App() {
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
             {screen === 'memory' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
+            {screen === 'ideas' && <div className="page-transition"><IdeasEngine userId={userId} language={language} /></div>}
             {screen === 'more' && <div className="page-transition"><ControlCenter userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
           </motion.div>
         </AnimatePresence>
