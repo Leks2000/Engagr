@@ -12,6 +12,7 @@ import Queue from './screens/Queue'
 import ControlCenter from './screens/ControlCenter'
 import UserMemory from './screens/UserMemory'
 import IdeasEngine from './screens/IdeasEngine'
+import XSettings from './screens/XSettings'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -93,9 +94,16 @@ const NAV_ITEMS = [
   { id: 'more', labelKey: 'more', icon: MoreIcon },
 ]
 
+// ── Extension bridge state (shared across screens) ──────────────────────
+export const ExtensionContext = {
+  isPresent: false,
+  lastSync: null,
+}
+
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
+  const [extensionPresent, setExtensionPresent] = useState(false)
   // Language: from settings or auto-detected from Telegram
   const language = settings?.language || detectedLanguage
   const t = useMemo(() => translations[language] || translations.en, [language])
@@ -146,6 +154,47 @@ function App() {
   useEffect(() => {
     if (webAppReady) loadSettings()
   }, [webAppReady])
+  // ── Extension bridge: listen for BRIDGE_READY signal ──────────────────
+  useEffect(() => {
+    const handleExtMessage = (event) => {
+      if (event.source !== window) return
+      const data = event.data || {}
+      if (data.source !== 'ENGAGR_EXTENSION') return
+
+      if (data.type === 'ENGAGR_BRIDGE_READY') {
+        setExtensionPresent(true)
+        ExtensionContext.isPresent = true
+        // Re-fire context immediately so extension gets userId right after READY
+        if (settings) {
+          window.postMessage({
+            source: 'ENGAGR_MINI_APP',
+            type: 'ENGAGR_MINI_APP_CONTEXT',
+            payload: {
+              userId,
+              apiBaseUrl: API_BASE,
+              miniAppUrl: window.location.origin,
+              language,
+              linkedin: settings.linkedin || {},
+              reddit: settings.reddit || {},
+            },
+          }, '*')
+        }
+      }
+
+      if (data.type === 'ENGAGR_CONTEXT_SYNCED') {
+        ExtensionContext.lastSync = new Date().toISOString()
+      }
+    }
+
+    window.addEventListener('message', handleExtMessage)
+
+    // Ping extension to check if already ready (e.g. page reload)
+    window.postMessage({ source: 'ENGAGR_MINI_APP', type: 'ENGAGR_PING' }, '*')
+
+    return () => window.removeEventListener('message', handleExtMessage)
+  }, [settings, language])
+
+  // ── Fire context whenever settings change ────────────────────────────────
   useEffect(() => {
     if (!settings) return
 
@@ -160,7 +209,7 @@ function App() {
         linkedin: settings.linkedin || {},
         reddit: settings.reddit || {},
       },
-    }, window.location.origin)
+    }, '*')
   }, [settings, language])
 
 
@@ -202,12 +251,13 @@ function App() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
-            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} language={language} /></div>}
+            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} language={language} extensionPresent={extensionPresent} /></div>}
             {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
             {screen === 'memory' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
             {screen === 'ideas' && <div className="page-transition"><IdeasEngine userId={userId} language={language} /></div>}
+            {screen === 'x' && <div className="page-transition"><XSettings language={language} /></div>}
             {screen === 'more' && <div className="page-transition"><ControlCenter userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
           </motion.div>
         </AnimatePresence>

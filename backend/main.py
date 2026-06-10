@@ -36,6 +36,7 @@ import daily_digest
 import ai_comment
 import user_memory
 import ideas_engine
+import twitter_bot
 
 # ── Logging ───────────────────────────────────────────
 
@@ -1470,6 +1471,215 @@ def get_ideas_stats(user_id):
     try:
         stats = ideas_engine.get_ideas_stats(user_id)
         return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── X / Twitter Endpoints (Step 10) ──────────────────
+
+
+@api.route("/api/x/<user_id>/trends", methods=["GET"])
+def x_trends(user_id):
+    """Get trending X/Twitter topics, enriched with AI angles."""
+    try:
+        settings = storage.load_settings(user_id) or {}
+        x_settings = settings.get("x", {})
+        keywords = x_settings.get("keywords", [])
+        bearer_token = os.environ.get("TWITTER_BEARER_TOKEN") or x_settings.get("bearer_token", "")
+        refresh = request.args.get("refresh") == "1"
+        limit = int(request.args.get("limit", 20))
+
+        trends = twitter_bot.get_x_trends(
+            user_id=user_id,
+            keywords=keywords,
+            bearer_token=bearer_token or None,
+            refresh=refresh,
+        )
+        return jsonify({"trends": trends[:limit], "total": len(trends)})
+    except Exception as e:
+        logger.error("X trends error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/generate-reply", methods=["POST"])
+def x_generate_reply(user_id):
+    """Generate an AI reply for an X/Twitter post."""
+    try:
+        body = request.get_json(force=True) or {}
+        post_text = body.get("post_text", "")
+        post_author = body.get("post_author", "")
+        post_url = body.get("post_url", "")
+        language = body.get("language", "en")
+
+        if not post_text:
+            return jsonify({"error": "post_text is required"}), 400
+
+        settings = storage.load_settings(user_id) or {}
+        memory = user_memory.load_memory(user_id)
+        groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
+
+        result = twitter_bot.generate_x_reply(
+            post_text=post_text,
+            post_author=post_author,
+            post_url=post_url,
+            user_memory=memory,
+            groq_api_key=groq_key or None,
+            language=language,
+        )
+
+        # Auto-save to stats
+        try:
+            stats = storage.load_stats(user_id) or {}
+            x_stats = stats.get("x", {})
+            x_stats["replies_generated"] = x_stats.get("replies_generated", 0) + 1
+            x_stats["last_activity"] = datetime.now(timezone.utc).isoformat()
+            stats["x"] = x_stats
+            storage.save_stats(user_id, stats)
+        except Exception:
+            pass
+
+        return jsonify(result)
+    except Exception as e:
+        logger.error("X reply generation error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/generate-thread", methods=["POST"])
+def x_generate_thread(user_id):
+    """Draft a Twitter thread for a given topic and angle."""
+    try:
+        body = request.get_json(force=True) or {}
+        topic = body.get("topic", "")
+        angle = body.get("angle", "")
+        language = body.get("language", "en")
+        tweet_count = min(int(body.get("tweet_count", 5)), 10)
+
+        if not topic:
+            return jsonify({"error": "topic is required"}), 400
+
+        settings = storage.load_settings(user_id) or {}
+        memory = user_memory.load_memory(user_id)
+        groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
+
+        result = twitter_bot.generate_x_thread(
+            topic=topic,
+            angle=angle or f"My take on {topic}",
+            user_memory=memory,
+            groq_api_key=groq_key or None,
+            language=language,
+            tweet_count=tweet_count,
+        )
+
+        # Auto-save to stats
+        try:
+            stats = storage.load_stats(user_id) or {}
+            x_stats = stats.get("x", {})
+            x_stats["threads_drafted"] = x_stats.get("threads_drafted", 0) + 1
+            x_stats["last_activity"] = datetime.now(timezone.utc).isoformat()
+            stats["x"] = x_stats
+            storage.save_stats(user_id, stats)
+        except Exception:
+            pass
+
+        return jsonify(result)
+    except Exception as e:
+        logger.error("X thread generation error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/save-to-queue", methods=["POST"])
+def x_save_to_queue(user_id):
+    """Save an X reply or thread draft to the approval queue."""
+    try:
+        body = request.get_json(force=True) or {}
+        item_type = body.get("type", "reply")  # "reply" | "thread"
+        post_text = body.get("post_text", "")
+        post_author = body.get("post_author", "")
+        post_url = body.get("post_url", "")
+        comment = body.get("comment", "")
+        tweets = body.get("tweets", [])
+        topic = body.get("topic", "")
+
+        if item_type == "reply" and not comment:
+            return jsonify({"error": "comment is required for reply type"}), 400
+        if item_type == "thread" and not tweets:
+            return jsonify({"error": "tweets array is required for thread type"}), 400
+
+        queue_item = {
+            "id": str(uuid.uuid4()),
+            "platform": "x",
+            "action": "reply" if item_type == "reply" else "thread",
+            "post_text": post_text,
+            "post_excerpt": post_text[:120] if post_text else topic[:120],
+            "author": post_author,
+            "post_url": post_url,
+            "selected_comment": comment,
+            "tweets": tweets,
+            "topic": topic,
+            "source": "x_trends",
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        storage.add_to_queue(user_id, queue_item)
+
+        # Update stats
+        try:
+            stats = storage.load_stats(user_id) or {}
+            x_stats = stats.get("x", {})
+            x_stats["items_queued"] = x_stats.get("items_queued", 0) + 1
+            stats["x"] = x_stats
+            storage.save_stats(user_id, stats)
+        except Exception:
+            pass
+
+        return jsonify({"ok": True, "queued": True, "item_id": queue_item["id"]})
+    except Exception as e:
+        logger.error("X save-to-queue error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/stats", methods=["GET"])
+def x_stats(user_id):
+    """Get X/Twitter engagement stats for a user."""
+    try:
+        stats = twitter_bot.get_x_stats(user_id, storage_module=storage)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/settings", methods=["GET"])
+def x_get_settings(user_id):
+    """Get X settings for a user."""
+    try:
+        settings = storage.load_settings(user_id) or {}
+        x_settings = settings.get("x", {})
+        # Never expose bearer_token to frontend
+        safe = {k: v for k, v in x_settings.items() if k != "bearer_token"}
+        return jsonify(safe)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/x/<user_id>/settings", methods=["PUT"])
+def x_update_settings(user_id):
+    """Update X settings for a user."""
+    try:
+        body = request.get_json(force=True) or {}
+        settings = storage.load_settings(user_id) or {}
+        x_settings = settings.get("x", {})
+
+        # Allowed fields (no bearer_token from frontend)
+        allowed = ["keywords", "tone", "daily_limit_replies", "daily_limit_threads",
+                   "auto_scan", "language", "connected", "handle"]
+        for key in allowed:
+            if key in body:
+                x_settings[key] = body[key]
+
+        settings["x"] = x_settings
+        storage.save_settings(user_id, settings)
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

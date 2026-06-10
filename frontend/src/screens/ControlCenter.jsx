@@ -20,7 +20,7 @@ const I18N = {
     memory: 'My Profile',
     memoryText: 'Project, audience, goals, expertise — personalized AI comments.',
     x: 'X / Twitter',
-    xText: 'Trends, replies, post ideas, and thread workflows will live here.',
+    xText: 'Trends, reply generation, thread drafts, and X queue workflow.',
     ideas: 'Ideas Engine',
     ideasText: 'AI/dev/startup news collection for content and comment ideas.',
     language: 'Language',
@@ -51,7 +51,7 @@ const I18N = {
     memory: 'Мой профиль',
     memoryText: 'Проект, аудитория, цели, экспертиза — персонализация AI.',
     x: 'X / Twitter',
-    xText: 'Тренды, ответы, идеи постов и треды будут здесь.',
+    xText: 'Тренды, генерация ответов, треды и очередь для X.',
     ideas: 'Ideas Engine',
     ideasText: 'Сбор AI/dev/startup новостей для идей контента и комментариев.',
     language: 'Язык',
@@ -82,7 +82,7 @@ const I18N = {
     memory: 'Mi Perfil',
     memoryText: 'Proyecto, audiencia, metas, expertise — comentarios IA personalizados.',
     x: 'X / Twitter',
-    xText: 'Tendencias, respuestas, ideas de posts e hilos vivirán aquí.',
+    xText: 'Tendencias, generación de respuestas, hilos y cola para X.',
     ideas: 'Ideas Engine',
     ideasText: 'Noticias AI/dev/startup para ideas de contenido y comentarios.',
     language: 'Idioma',
@@ -113,7 +113,7 @@ const I18N = {
     memory: 'Mein Profil',
     memoryText: 'Projekt, Zielgruppe, Ziele, Expertise — personalisierte KI-Kommentare.',
     x: 'X / Twitter',
-    xText: 'Trends, Antworten, Post-Ideen und Threads kommen hierhin.',
+    xText: 'Trends, Reply-Generierung, Thread-Entwürfe und X-Warteschlange.',
     ideas: 'Ideas Engine',
     ideasText: 'AI/dev/startup News für Content- und Kommentarideen.',
     language: 'Sprache',
@@ -175,6 +175,13 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
       status: t.ready,
       tone: 'ideas',
     },
+    {
+      id: 'x',
+      title: t.x,
+      text: t.xText,
+      status: t.ready,
+      tone: 'x',
+    },
   ]), [settings, t])
 
   const save = async (field, payload) => {
@@ -212,11 +219,6 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
             <span className="control-open">{t.open} →</span>
           </button>
         ))}
-      </div>
-
-      <SectionTitle>{t.comingNext}</SectionTitle>
-      <div className="grid grid-cols-1 gap-3 mb-5">
-        <RoadmapCard title={t.x} text={t.xText} badge={t.planned} />
       </div>
 
       <SectionTitle>{t.settings}</SectionTitle>

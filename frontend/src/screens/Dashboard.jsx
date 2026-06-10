@@ -74,7 +74,7 @@ const DASH_I18N = {
   },
 }
 
-export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate, language = 'en' }) {
+export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onNavigate, language = 'en', extensionPresent = false }) {
   const t = DASH_I18N[language] || DASH_I18N.en
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -227,6 +227,18 @@ export default function Dashboard({ userId: uid, settings, onSettingsUpdate, onN
 
   return (
     <div className="px-5 pt-6 animate-fade-in">
+      {/* Extension bridge status banner */}
+      {extensionPresent && (
+        <div style={{
+          background: '#f0fdf4', border: '1px solid #bbf7d0',
+          borderRadius: 10, padding: '6px 12px', marginBottom: 10,
+          fontSize: 12, color: '#15803d', display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <span>🔌</span>
+          <span>Engagr WebBridge connected — LinkedIn parsing active</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
