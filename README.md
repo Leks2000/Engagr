@@ -127,6 +127,14 @@ engagr/
 │   ├── scheduler.py
 │   ├── telegram_bot.py
 │   └── setup.py
+├── extension/
+│   ├── manifest.json
+│   ├── src/
+│   │   ├── popup.html
+│   │   ├── popup.css
+│   │   ├── popup.js
+│   │   ├── linkedin_parser.js
+│   │   └── background.js
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
@@ -142,78 +150,119 @@ engagr/
 ---
 
 
+
 ## Personal MVP Architecture (Extension-first)
 
-This project is moving toward a **personal, local-first AI Social Copilot MVP**. For the next build stage, the Chrome Extension is the main runtime and the Telegram Mini App is the control surface. Backend, database, Docker, multi-user auth, and multi-account infrastructure are intentionally out of scope until the extension workflow is useful every day.
+For the current personal MVP, Engagr is intentionally moving toward a lightweight browser bridge instead of a full server-heavy automation stack.
 
 ```mermaid
 flowchart TD
-    U[You] --> TMA[Telegram Mini App
-Dashboard / Queue / Settings]
-    U --> EXT[Chrome Extension
-Popup + Content Scripts]
-
-    TMA -. future local bridge / shared state .-> EXT
-    EXT --> STORE[(chrome.storage.local
-settings, queue, memory)]
-    EXT --> AI[Groq / OpenAI API
-comment generation]
-
-    EXT --> LI[LinkedIn Worker
-parse feed, insert comment, like, connect]
-    EXT --> RD[Reddit Worker
-parse posts, comment, upvote]
-    EXT --> XW[X / Twitter Worker
-trends, replies, post ideas, threads]
-
-    LI --> Q[Approval Queue
-Approve / Skip / Regenerate]
-    RD --> Q
-    XW --> Q
-    AI --> Q
-
-    Q -->|approved| EXT
-    EXT -->|DOM actions after approval| LI
-    EXT -->|DOM actions after approval| RD
-    EXT -->|DOM actions after approval| XW
+    TMA[Telegram Mini App
+Approve / Edit / Skip / Regenerate] --> EXT[Chrome Extension
+Engagr WebBridge]
+    EXT --> LI[LinkedIn]
+    EXT -. later .-> RD[Reddit]
+    EXT -. later .-> X[X / Twitter]
 ```
+
+### What we deliberately avoid in the personal MVP
+
+- No extra backend owned by the extension.
+- No extension database.
+- No Docker requirement for browser workflows.
+- No separate extension user authorization.
+- No multi-account mode.
+- No automatic final publish in v0.1; the human stays in control.
 
 ### MVP 10 Steps
 
-| Step | Status | Goal | Result |
-|------|--------|------|--------|
-| 1. Extension | ⬜ Planned | Manifest V3, popup UI, settings, `chrome.storage`, connection/status check. | Extension v0.1 loads and shows connected/ready state. |
-| 2. LinkedIn Parser | ⬜ Planned | Read LinkedIn feed posts: author, text, URL. | `{ author, post, url }` objects collected from the page. |
-| 3. AI Comments | ⬜ Planned | Connect Groq/OpenAI, generate comments, regenerate variants. | Each parsed post can receive an AI comment draft. |
-| 4. Mini App | ⬜ Planned | Control center with Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings. | A single UI for reviewing work and settings. |
-| 5. Approval Queue | ⬜ Planned | Approve, Skip, Regenerate flow before any action. | AI drafts wait for your decision. |
-| 6. LinkedIn Actions | ⬜ Planned | Insert comments, like posts, prepare connect messages. | Approve → extension opens LinkedIn → draft is inserted. |
-| 7. Reddit | ⬜ Later | Repeat parser, comments, queue, upvote flow for Reddit. | Reddit opportunities enter the same queue. |
-| 8. User Memory | ⬜ Later | Store project, audience, goal, tone, interaction history. | More personalized comments and recommendations. |
-| 9. Ideas Engine | ⬜ Later | Collect AI/dev/startup news and generate content ideas. | 5 posts, 3 threads, 10 comment ideas. |
-| 10. X / Twitter | ⬜ Later | Trends, replies, post ideas, threads. | X becomes a third platform module. |
+| Step | Status | Scope | Result |
+|------|--------|-------|--------|
+| 1. Extension | ✅ Done | Manifest V3, popup UI, settings, `chrome.storage`, connection check | `extension/` contains Engagr WebBridge shell |
+| 2. LinkedIn Parser | ✅ Done | Read feed posts, author, post URL, post text | Popup scan returns `{ "author": "...", "post": "...", "url": "..." }` |
+| 3. AI Comments | ✅ Done | Use current Groq provider flow, generate/regenerate comment | Parsed LinkedIn post → AI comment variants are saved in the extension preview |
+| 4. Mini App | ✅ Done | Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings | Control center with platform cards, planned modules, and settings |
+| 5. Approval Queue | ✅ Done | Approve, edit, skip, regenerate, receive extension-found posts | Human-reviewed queue populated from WebBridge scans |
+| 6. LinkedIn Actions | ⏳ Planned | Insert prepared comment, like, connect, connect message | Manual final publish flow |
+| 7. Reddit | ⏳ Later | Search posts/subreddits, comments, upvote | Reddit workflow parity |
+| 8. User Memory | ⏳ Later | Project, audience, goal, tone profile | Personalized comments |
+| 9. Ideas Engine | ⏳ Later | AI/dev/startup news collection | Content ideas and comment ideas |
+| 10. X / Twitter | ⏳ Later | Trends, replies, post ideas, threads | X workflow parity |
 
-### MVP to build now
+The immediate MVP target is steps 1–6: open Telegram, review a found post, approve or edit the generated answer, open LinkedIn, and let the extension prepare the browser-side action while you decide the final submit. Steps 1–5 are complete; the current next task is Step 6, LinkedIn browser-side actions.
 
-The first usable MVP is only steps **1–6**:
+See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) and [`extension/README.md`](extension/README.md) for local installation and release notes.
 
-```text
-Open Telegram / extension UI
-↓
-See a LinkedIn post opportunity
-↓
-AI generates a comment
-↓
-Approve / Skip / Regenerate
-↓
-Extension opens LinkedIn
-↓
-Extension inserts the approved comment draft
-↓
-You make the final publish decision
+---
+
+## Project Architecture Flowchart
+
+```mermaid
+flowchart TD
+    U[User / Founder] --> TG[Telegram Bot chat]
+    U --> MA[Telegram Mini App
+React + Vite frontend]
+
+    TG -->|commands, approvals, queue cards| BOT[backend/telegram_bot.py
+python-telegram-bot]
+    MA -->|REST API calls| API[backend/main.py
+Flask API + CORS]
+
+    API --> STORE[(data/user_id/ JSON files
+settings, queue, stats, cookies, memory)]
+    BOT --> STORE
+    API --> SCHED[backend/scheduler.py
+APScheduler jobs]
+    BOT --> SCHED
+
+    SCHED -->|scheduled or manual sessions| LI_DISC[LinkedIn discovery
+backend/linkedin.py]
+    SCHED -->|scheduled or manual sessions| RD_DISC[Reddit discovery
+backend/reddit_public.py / reddit_bot.py]
+    SCHED --> DIGEST[Daily digest / news grounding
+backend/daily_digest.py + news_grounding.py]
+
+    LI_DISC --> LINKEDIN[(LinkedIn)]
+    RD_DISC --> REDDIT[(Reddit public feeds / Reddit account)]
+    DIGEST --> RSS[(RSS/news sources)]
+
+    LI_DISC --> HUMAN[Humanness filter
+backend/humanness_scorer.py]
+    RD_DISC --> HUMAN
+    HUMAN --> AI[AI comment generation
+backend/ai_comment.py + Groq API]
+    AI --> QUEUE[(Approval queue
+data/user_id/queue.json)]
+    QUEUE --> API
+    QUEUE --> BOT
+
+    API -->|approve / edit / skip / regenerate| QUEUE
+    BOT -->|approve / skip callbacks| QUEUE
+    QUEUE --> EXEC[backend/queue_executor.py
+delayed safe execution]
+
+    EXEC -->|comments, likes, connects| LINKEDIN
+    EXEC -->|comments, upvotes or manual fallback| REDDIT
+    EXEC --> STATS[(stats + interaction memory
+smart_schedule analytics)]
+    STATS --> STORE
+
+    API --> SMART[Smart schedule, replies, invite generator, analytics endpoints]
+    SMART --> STORE
+    SMART --> AI
 ```
 
-See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) for the planned local setup, loading, and Chrome Web Store release checklist.
+### How the project works
+
+1. **User entry points:** users interact either with the Telegram bot chat or with the Telegram Mini App frontend. The Mini App is a React/Vite application that derives the Telegram user id, loads settings, and calls the backend REST API.
+2. **Backend runtime:** `backend/main.py` starts the Flask API in a background thread, starts APScheduler, restores all user schedules, then starts Telegram polling.
+3. **Configuration and persistence:** settings, queue items, statistics, cookies, connected profiles, and memory are persisted as JSON files under `data/user_id/`.
+4. **Scheduling:** changing settings through the Mini App or bot reschedules user jobs. LinkedIn and Reddit sessions are created from user-configured session times, and the daily digest is scheduled when news grounding is enabled.
+5. **Discovery:** LinkedIn sessions use `backend/linkedin.py`; Reddit sessions prefer the public parser in `backend/reddit_public.py` and can fall back to account-backed `backend/reddit_bot.py` when credentials are available.
+6. **AI and filtering:** discovered posts are filtered/scored, then `backend/ai_comment.py` asks Groq for short contextual comment variants in the right platform tone/language.
+7. **Human approval queue:** generated comments, likes, and upvotes are saved as pending queue items and shown in both the Mini App Queue screen and Telegram chat cards. Users can approve, edit, skip, select variants, or regenerate.
+8. **Safe execution:** approved queue items are posted after randomized anti-spam delays by `backend/queue_executor.py`. Successful actions increment daily stats, update interaction memory, and feed analytics/smart scheduling.
+9. **Extra growth features:** the API also exposes smart scheduling, weekly/monthly analytics, nested reply suggestions, trending news, invite generation, humanness scoring, interaction memory, and daily digest preview/send endpoints.
 
 ---
 

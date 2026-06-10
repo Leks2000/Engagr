@@ -1,124 +1,89 @@
 # Engagr Extension Guide
 
-This guide describes the planned local-first Chrome Extension workflow for the personal MVP. The extension itself is not implemented yet; this file is the build and launch checklist for the next iterations.
+This guide explains how to run the personal **Engagr WebBridge** Chrome Extension MVP.
 
-## MVP scope
+## Current MVP decision
 
-The first working MVP should include only:
-
-1. Chrome Extension scaffold.
-2. LinkedIn parser.
-3. AI comment generation.
-4. Mini App / extension control UI.
-5. Approval queue.
-6. LinkedIn actions.
-
-Reddit, user memory, ideas engine, and X/Twitter come after the LinkedIn MVP is usable.
-
-## Target local architecture
-
-```mermaid
-flowchart TD
-    EXT[Chrome Extension] --> POPUP[Popup UI]
-    EXT --> CONTENT[LinkedIn Content Script]
-    EXT --> STORAGE[(chrome.storage.local)]
-    EXT --> AI[Groq / OpenAI API]
-
-    POPUP --> SETTINGS[Settings]
-    POPUP --> QUEUE[Approval Queue]
-    CONTENT --> PARSER[LinkedIn Parser]
-    PARSER --> AI
-    AI --> QUEUE
-    QUEUE --> ACTIONS[LinkedIn Actions]
-    ACTIONS --> LINKEDIN[(LinkedIn page DOM)]
-```
-
-## Planned extension folder
+For v0.1 the extension is a local browser bridge:
 
 ```text
-extension/
-├── manifest.json
-├── src/
-│   ├── background.js
-│   ├── popup/
-│   │   ├── index.html
-│   │   ├── popup.css
-│   │   └── popup.js
-│   ├── content/
-│   │   └── linkedin.js
-│   └── shared/
-│       ├── aiClient.js
-│       ├── queueStore.js
-│       └── storage.js
-└── assets/
-    └── icon.png
+Telegram Mini App
+  ↓ approve / edit / skip / regenerate
+Chrome Extension: Engagr WebBridge
+  ↓ prepare browser-side action
+LinkedIn
 ```
 
-## Local installation flow
+The extension does **not** publish comments automatically in v0.1. The safer flow is: Engagr prepares or inserts the approved text, then you manually review and click the final LinkedIn publish button.
 
-After the extension is implemented:
+## AI provider
 
-1. Open Chrome.
-2. Go to `chrome://extensions`.
+The project currently uses Groq in the backend AI comment module, so the extension defaults to **Groq** as the MVP provider label. OpenAI remains a selectable future option in the popup settings.
+
+## Local install in Chrome
+
+1. Start the Mini App if you want the connection check to show as connected.
+
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+2. Open Chrome and go to:
+
+   ```text
+   chrome://extensions
+   ```
+
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
-5. Select the `extension/` folder.
-6. Pin the Engagr extension to the toolbar.
-7. Open the popup and verify the status is **Connected** / **Ready**.
+5. Select the repository `extension/` directory.
+6. Pin **Engagr WebBridge** in the browser toolbar.
+7. Open the Engagr Telegram Mini App once. The frontend sends its user ID, API URL, and selected LinkedIn keywords to the extension automatically.
+8. Open LinkedIn and click the extension popup. It will use the synced Mini App settings; there is no extension form to fill.
 
-## Local settings checklist
+## v0.1 checklist
 
-Store these values in `chrome.storage.local` from the popup settings screen:
-
-```json
-{
-  "ai_provider": "groq",
-  "api_key": "your_api_key_here",
-  "tone": "technical",
-  "project": "Yosya",
-  "audience": "developers",
-  "goal": "growth"
-}
-```
-
-## Daily LinkedIn workflow
-
-1. Open LinkedIn in Chrome.
-2. Open the Engagr extension popup.
-3. Click **Scan LinkedIn**.
-4. Review parsed posts in Queue.
-5. Click **Generate** or **Regenerate** for AI comments.
-6. Click **Approve** on the best draft.
-7. Extension opens/focuses the LinkedIn post.
-8. Extension inserts the approved comment draft.
-9. You manually review and press the final LinkedIn submit button.
-
-## Design direction
-
-The first popup should follow a clean card-based style similar to the reference image:
-
-- white card on light background;
-- small app icon on the left;
-- app title, for example **Engagr WebBridge**;
-- green rounded **Connected** pill;
-- large center status icon;
-- short status text such as **Browser assistant is ready**;
-- compact actions: **Scan**, **Queue**, **Settings**.
+- [x] Manifest V3 extension.
+- [x] Popup UI matching the WebBridge reference direction.
+- [x] Settings saved via `chrome.storage.sync`.
+- [x] Mini App connection check.
+- [x] Active LinkedIn tab detection.
+- [x] LinkedIn feed parser.
+- [x] AI comment generation/regeneration for parsed LinkedIn posts.
+- [x] Automatic Mini App sync for user ID, API URL, and LinkedIn keywords.
+- [x] Send parsed posts to the Mini App approval queue.
+- [ ] Prepare approved LinkedIn comment action.
 
 ## Chrome Web Store release checklist
 
-When the local MVP is stable:
+Use this only when the local MVP is stable enough to publish.
 
-1. Prepare production icons: 16, 32, 48, 128 px.
-2. Remove debug logs and test API keys.
-3. Add a clear privacy policy.
-4. Explain host permissions for LinkedIn/Reddit/X.
-5. Build a ZIP from the extension folder.
-6. Create a Chrome Web Store Developer account.
-7. Upload the ZIP.
-8. Add screenshots and description.
-9. Submit for review.
+- Prepare production extension name and description.
+- Add production-safe extension icons as supported store assets.
+- Remove unused host permissions or narrow them to required domains.
+- Add a privacy policy explaining what page data is read.
+- Confirm there is no automatic final submit without clear user action.
+- Zip the `extension/` directory.
+- Upload the ZIP in Chrome Web Store Developer Dashboard.
+- Complete screenshots, category, privacy practices, and review notes.
 
-## Important MVP constraint
+## Troubleshooting
 
-The first version should not auto-publish by default. The extension should insert drafts and let the user make the final publish decision inside LinkedIn.
+### Popup says “Mini App not reachable”
+
+- Make sure `npm run dev` is running in `frontend/`.
+- Confirm the popup Mini App URL matches the Vite URL.
+- For production, replace the local URL with the deployed Mini App URL.
+
+### LinkedIn tab is not detected
+
+- Open a tab under `https://www.linkedin.com/`.
+- Reopen the extension popup.
+- Confirm the extension has the requested host permissions.
+
+### Settings are not saved
+
+- Reload the unpacked extension from `chrome://extensions`.
+- Reopen the popup and try **Save settings** again.
