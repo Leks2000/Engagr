@@ -739,3 +739,105 @@ input[type="range"]::-moz-range-thumb {
 .queue-filter-btn:active {
   transform: scale(0.97);
 }
+
+/* ── Control Center ─────────────────────────── */
+.control-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+  background: var(--color-card);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 16px;
+  color: var(--color-text);
+  font: inherit;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+button.control-card {
+  cursor: pointer;
+}
+
+button.control-card:hover {
+  transform: translateY(-1px);
+  background: #fff;
+}
+
+.control-card-linkedin:hover,
+.control-card-linkedin:focus-visible {
+  border-color: #0A66C2;
+}
+
+.control-card-reddit:hover,
+.control-card-reddit:focus-visible {
+  border-color: #FF4500;
+}
+
+.control-card-queue:hover,
+.control-card-queue:focus-visible {
+  border-color: #111827;
+}
+
+.control-card-planned {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.control-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.control-open {
+  color: #0A66C2;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.control-settings-card,
+.control-safety-card {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.control-select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.control-select:focus {
+  border-color: #0A66C2;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 102, 194, 0.12);
+}
+
+.control-user-id {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  padding: 10px 12px;
+}
