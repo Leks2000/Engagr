@@ -53,28 +53,9 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 - [x] Settings saved via `chrome.storage.sync`.
 - [x] Mini App connection check.
 - [x] Active LinkedIn tab detection.
-- [x] LinkedIn feed parser.
+- [ ] LinkedIn feed parser.
 - [ ] Send parsed posts to the Mini App approval queue.
 - [ ] Prepare approved LinkedIn comment action.
-
-
-## LinkedIn parser usage
-
-1. Open `https://www.linkedin.com/feed/` in Chrome.
-2. Scroll until the posts you want are visible.
-3. Open **Engagr WebBridge**.
-4. Click **Scan LinkedIn feed**.
-5. The popup stores the latest parsed items locally as:
-
-   ```json
-   {
-     "author": "...",
-     "post": "...",
-     "url": "..."
-   }
-   ```
-
-For v0.2 this is intentionally read-only parsing. Sending these parsed posts into the Mini App approval queue belongs to the next integration step.
 
 ## Chrome Web Store release checklist
 

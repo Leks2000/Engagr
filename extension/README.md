@@ -9,7 +9,6 @@ Personal Chrome Extension MVP for connecting browser workflows with the Engagr T
 - Local settings stored in `chrome.storage.sync`.
 - Mini App connection check.
 - Active-tab LinkedIn detection.
-- Read-only LinkedIn feed parser that extracts author, post text, and post URL.
 
 ## Non-goals for v0.1
 
@@ -26,18 +25,3 @@ Personal Chrome Extension MVP for connecting browser workflows with the Engagr T
 3. Click **Load unpacked**.
 4. Select this `extension/` directory.
 5. Open the extension popup and set the Mini App URL.
-
-
-## Parser output
-
-The LinkedIn parser returns an array shaped like:
-
-```json
-[
-  {
-    "author": "...",
-    "post": "...",
-    "url": "..."
-  }
-]
-```
