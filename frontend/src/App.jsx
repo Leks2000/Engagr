@@ -10,6 +10,7 @@ import LinkedInSettings from './screens/LinkedInSettings'
 import RedditSettings from './screens/RedditSettings'
 import Queue from './screens/Queue'
 import ControlCenter from './screens/ControlCenter'
+import UserMemory from './screens/UserMemory'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -204,6 +205,7 @@ function App() {
             {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
+            {screen === 'memory' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
             {screen === 'more' && <div className="page-transition"><ControlCenter userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
           </motion.div>
         </AnimatePresence>

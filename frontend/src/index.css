@@ -781,6 +781,11 @@ button.control-card:hover {
   border-color: #111827;
 }
 
+.control-card-memory:hover,
+.control-card-memory:focus-visible {
+  border-color: #7c3aed;
+}
+
 .control-card-planned {
   background: #f8fafc;
   border-color: #e2e8f0;
@@ -840,4 +845,34 @@ button.control-card:hover {
   color: #334155;
   font-size: 12px;
   padding: 10px 12px;
+}
+
+/* ── User Memory Screen ─────────────────────────── */
+
+.memory-input {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 13px;
+  padding: 10px 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.memory-input:focus {
+  border-color: #7c3aed;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+}
+
+.memory-input::placeholder {
+  color: #94a3b8;
+}
+
+.memory-textarea {
+  resize: vertical;
+  min-height: 56px;
+  line-height: 1.5;
 }

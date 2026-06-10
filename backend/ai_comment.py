@@ -9,6 +9,7 @@ import logging
 from groq import Groq
 
 from config import GROQ_API_KEY, GROQ_MODEL
+import user_memory
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,10 @@ SYSTEM_PROMPT = (
     "Rules: 3-20 words, match post language exactly, sound human, "
     "no hashtags, no emojis, no self-promotion, add real value. "
     "If relevant trending news is provided, you may subtly reference it "
-    "to make your comment feel more current and informed."
+    "to make your comment feel more current and informed. "
+    "If author profile context is provided, use it to write comments "
+    "that align with their expertise and goals — but never mention "
+    "their project name or explicitly promote it."
 )
 
 TONE_GUIDE = {
@@ -46,20 +50,27 @@ def _clean_comment(text: str) -> str:
     return text.strip()
 
 
-def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly") -> str:
+def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly", user_id: str = "") -> str:
     """
     Generate a single short, genuine comment for a social media post.
     The AI automatically matches the language of the post.
-    Integrates news grounding for more relevant comments.
+    Integrates news grounding and user memory for more relevant comments.
     """
     try:
         client = _get_client()
 
         tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
+
+        # Build user memory context if available
+        memory_context = ""
+        if user_id:
+            memory_context = user_memory.build_ai_context(user_id)
+
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
-            f"Post content:\n{post_text[:500]}\n\n"
+            + (f"{memory_context}\n\n" if memory_context else "")
+            + f"Post content:\n{post_text[:500]}\n\n"
             f"Write your comment (3-20 words, match post language):"
         )
 
@@ -84,7 +95,7 @@ def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "fr
 
 
 def generate_comment_variants(
-    post_text: str, user_language: str = "en", platform: str = "linkedin", tone: str = "friendly"
+    post_text: str, user_language: str = "en", platform: str = "linkedin", tone: str = "friendly", user_id: str = ""
 ) -> dict:
     """
     Generate 3 comment variants for a post with language detection.
@@ -101,10 +112,17 @@ def generate_comment_variants(
 
         # Step 1: Detect language and generate 3 variants
         tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
+
+        # Build user memory context if available
+        memory_context = ""
+        if user_id:
+            memory_context = user_memory.build_ai_context(user_id)
+
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
-            f"Post content:\n{post_text[:500]}\n\n"
+            + (f"{memory_context}\n\n" if memory_context else "")
+            + f"Post content:\n{post_text[:500]}\n\n"
             f"Tasks:\n"
             f"1. Detect the language of this post (output language code like 'en', 'ru', 'es', etc.)\n"
             f"2. Write exactly 3 different comment variants in the POST'S language (3-20 words each)\n\n"
@@ -210,7 +228,7 @@ def generate_comment_variants(
             return {"variants": ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."], "post_language": "en", "translations": None}
 
 
-def regenerate_comment(post_text: str, previous_comment: str, platform: str = "linkedin", tone: str = "friendly") -> str:
+def regenerate_comment(post_text: str, previous_comment: str, platform: str = "linkedin", tone: str = "friendly", user_id: str = "") -> str:
     """
     Regenerate a different comment, explicitly avoiding the previous one.
     """
@@ -218,10 +236,17 @@ def regenerate_comment(post_text: str, previous_comment: str, platform: str = "l
         client = _get_client()
 
         tone_hint = TONE_GUIDE.get((tone or "").lower(), TONE_GUIDE["friendly"])
+
+        # Build user memory context if available
+        memory_context = ""
+        if user_id:
+            memory_context = user_memory.build_ai_context(user_id)
+
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
-            f"Post content:\n{post_text[:500]}\n\n"
+            + (f"{memory_context}\n\n" if memory_context else "")
+            + f"Post content:\n{post_text[:500]}\n\n"
             f"Previous comment (write something DIFFERENT): {previous_comment}\n\n"
             f"Write a new comment (3-20 words, match post language):"
         )

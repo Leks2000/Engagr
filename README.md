@@ -185,11 +185,11 @@ Engagr WebBridge]
 | 5. Approval Queue | ✅ Done | Approve, edit, skip, regenerate, receive extension-found posts | Human-reviewed queue populated from WebBridge scans |
 | 6. LinkedIn Actions | ✅ Done | Insert prepared comment, like, connect, connect message | Extension content script prepares actions; user clicks final publish |
 | 7. Reddit | ✅ Done | Search posts/subreddits, comments, upvote | Public feed discovery, AI comments, queue, semi-auto & API-based posting |
-| 8. User Memory | ⏳ In Progress | Project, audience, goal, tone profile | Personalized comments |
+| 8. User Memory | ✅ Done | Project, audience, goal, tone profile | Personalized comments via profile context injection |
 | 9. Ideas Engine | ⏳ Later | AI/dev/startup news collection | Content ideas and comment ideas |
 | 10. X / Twitter | ⏳ Later | Trends, replies, post ideas, threads | X workflow parity |
 
-Steps 1–7 are complete. The extension handles LinkedIn browser-side actions (comment insertion, like, connect with invite note), and Reddit workflow includes public discovery, AI comment generation, semi-auto queue, and API-based posting/upvoting. The current next task is Step 8: User Memory — a personalization layer that stores project context, target audience, goals, and tone profile to generate more relevant AI comments.
+Steps 1–8 are complete. The extension handles LinkedIn browser-side actions (comment insertion, like, connect with invite note), Reddit workflow includes public discovery, AI comment generation, semi-auto queue, and API-based posting/upvoting, and User Memory provides a personalization layer that stores project context, target audience, goals, and tone profile to generate more relevant AI comments. The current next task is Step 9: Ideas Engine — AI/dev/startup news collection for content and comment ideas.
 
 See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) and [`extension/README.md`](extension/README.md) for local installation and release notes.
 

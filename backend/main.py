@@ -34,6 +34,7 @@ import interaction_memory
 import invite_generator
 import daily_digest
 import ai_comment
+import user_memory
 
 # ── Logging ───────────────────────────────────────────
 
@@ -173,6 +174,7 @@ def extension_linkedin_comment(user_id):
             user_language=user_language,
             platform="linkedin",
             tone=tone,
+            user_id=user_id,
         )
         variants = comment_data.get("variants") or []
         selected = variants[0] if variants else ""
@@ -212,6 +214,7 @@ def extension_linkedin_regenerate(user_id):
             previous_comment,
             platform="linkedin",
             tone=tone,
+            user_id=user_id,
         )
 
         return jsonify({
@@ -485,6 +488,7 @@ def regenerate_item(user_id, item_id):
             item.get("comment", ""),
             item.get("platform", "linkedin"),
             tone=tone,
+            user_id=user_id,
         )
 
         storage.update_queue_item(user_id, item_id, {"comment": new_comment})
@@ -927,7 +931,7 @@ def simulate_session(user_id):
         for post in sample_posts:
             try:
                 comment_data = ai_comment.generate_comment_variants(
-                    post["text"], user_language, post["platform"], tone=tone
+                    post["text"], user_language, post["platform"], tone=tone, user_id=user_id
                 )
                 variants = comment_data.get("variants", [post["text"][:100]])
                 item_id = f"sim_{uuid.uuid4().hex[:8]}"
@@ -1044,7 +1048,7 @@ def run_session_now(user_id):
 
             # Generate 3 comment variants with language detection
             comment_data = ai_comment.generate_comment_variants(
-                post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly")
+                post_text, user_language, "linkedin", tone=li_cfg.get("tone", "friendly"), user_id=user_id
             )
             variants = comment_data.get("variants", [])
             if not variants:
@@ -1326,6 +1330,54 @@ def record_interaction_endpoint(user_id):
             our_message=data.get("our_message", ""),
         )
         return jsonify({"status": "recorded"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── User Memory (Profile Context) Endpoints ──────────
+
+@api.route("/api/user-memory/<user_id>", methods=["GET"])
+def get_user_memory(user_id):
+    """Get user's profile memory (project, audience, goals, tone)."""
+    try:
+        memory = user_memory.get_memory(user_id)
+        return jsonify(memory)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/user-memory/<user_id>", methods=["POST"])
+def save_user_memory(user_id):
+    """Save or update user's profile memory."""
+    try:
+        data = request.get_json() or {}
+        saved = user_memory.save_memory(user_id, data)
+        return jsonify(saved)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/user-memory/<user_id>", methods=["DELETE"])
+def clear_user_memory(user_id):
+    """Reset user's profile memory to defaults."""
+    try:
+        result = user_memory.clear_memory(user_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/user-memory/<user_id>/status", methods=["GET"])
+def user_memory_status(user_id):
+    """Check if user memory is configured."""
+    try:
+        configured = user_memory.is_configured(user_id)
+        memory = user_memory.get_memory(user_id)
+        return jsonify({
+            "configured": configured,
+            "updated_at": memory.get("updated_at"),
+            "project_name": memory.get("project_name", ""),
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -229,7 +229,7 @@ async def run_linkedin_session(user_id: str):
                 templates = li_settings.get("cta_templates", []) or []
                 if templates and (generated_so_far + 1) % 10 == 0:
                     cta = random.choice(templates)
-                comment = ai_comment.generate_comment(post["text"], "linkedin", tone=li_settings.get("tone", "friendly"))
+                comment = ai_comment.generate_comment(post["text"], "linkedin", tone=li_settings.get("tone", "friendly"), user_id=user_id)
                 if cta:
                     comment = f"{comment} {cta}".strip()
                 _log(user_id, f"Post found by keyword. Generated {li_settings.get('tone', 'friendly')} comment.")
@@ -359,7 +359,7 @@ async def run_reddit_session(user_id: str):
         queued_comments = 0
         for post in posts[:remaining_comments]:
             try:
-                comment = ai_comment.generate_comment(post["text"], "reddit")
+                comment = ai_comment.generate_comment(post["text"], "reddit", user_id=user_id)
                 
                 queue_item = {
                     "id": str(uuid.uuid4()),
