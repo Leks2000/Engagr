@@ -144,6 +144,23 @@ function App() {
   useEffect(() => {
     if (webAppReady) loadSettings()
   }, [webAppReady])
+  useEffect(() => {
+    if (!settings) return
+
+    window.postMessage({
+      source: 'ENGAGR_MINI_APP',
+      type: 'ENGAGR_MINI_APP_CONTEXT',
+      payload: {
+        userId,
+        apiBaseUrl: API_BASE,
+        miniAppUrl: window.location.origin,
+        language,
+        linkedin: settings.linkedin || {},
+        reddit: settings.reddit || {},
+      },
+    }, window.location.origin)
+  }, [settings, language])
+
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)

@@ -40,12 +40,8 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 4. Click **Load unpacked**.
 5. Select the repository `extension/` directory.
 6. Pin **Engagr WebBridge** in the browser toolbar.
-7. Open the popup and set:
-   - Mini App URL: `http://localhost:5173` for local Vite development.
-   - Telegram user ID: required for AI comment generation.
-   - Engagr API URL: `https://engagr-production.up.railway.app` or your local API.
-   - AI provider: `Groq` for the current project default.
-8. Click **Save settings** or **Check**.
+7. Open the Engagr Telegram Mini App once. The frontend sends its user ID, API URL, and selected LinkedIn keywords to the extension automatically.
+8. Open LinkedIn and click the extension popup. It will use the synced Mini App settings; there is no extension form to fill.
 
 ## v0.1 checklist
 
@@ -56,6 +52,7 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 - [x] Active LinkedIn tab detection.
 - [x] LinkedIn feed parser.
 - [x] AI comment generation/regeneration for parsed LinkedIn posts.
+- [x] Automatic Mini App sync for user ID, API URL, and LinkedIn keywords.
 - [ ] Send parsed posts to the Mini App approval queue.
 - [ ] Prepare approved LinkedIn comment action.
 

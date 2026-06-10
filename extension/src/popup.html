@@ -56,39 +56,23 @@
         <div id="parsedPosts" class="parsed-posts" hidden></div>
       </section>
 
-      <section class="settings-panel" aria-label="Bridge settings">
-        <label>
-          <span>Mini App URL</span>
-          <input id="miniAppUrl" type="url" placeholder="http://localhost:5173" autocomplete="off" />
-        </label>
-
-        <label>
-          <span>Telegram user ID</span>
-          <input id="telegramUserId" type="text" placeholder="required for AI comments" autocomplete="off" />
-        </label>
-
-        <label>
-          <span>Engagr API URL</span>
-          <input id="apiBaseUrl" type="url" placeholder="https://engagr-production.up.railway.app" autocomplete="off" />
-        </label>
-
-        <label>
-          <span>AI provider</span>
-          <select id="aiProvider">
-            <option value="groq">Groq (project default)</option>
-            <option value="openai">OpenAI</option>
-          </select>
-        </label>
-
-        <label class="toggle-row">
-          <span>Open LinkedIn after approval</span>
-          <input id="autoOpenLinkedIn" type="checkbox" />
-        </label>
+      <section class="settings-panel auto-sync-panel" aria-label="Mini App sync status">
+        <div>
+          <h3>Mini App Sync</h3>
+          <p id="syncSummary">Open Engagr Mini App once and the bridge will connect automatically.</p>
+        </div>
+        <div class="sync-details">
+          <span>Telegram</span>
+          <strong id="syncedUserId">Not synced</strong>
+        </div>
+        <div class="sync-details">
+          <span>LinkedIn keywords</span>
+          <strong id="syncedKeywords">Waiting for Mini App settings</strong>
+        </div>
       </section>
 
       <footer class="actions-row">
-        <button id="saveButton" type="button">Save settings</button>
-        <button id="checkButton" type="button" class="secondary">Check</button>
+        <button id="checkButton" type="button" class="secondary">Re-check sync</button>
       </footer>
     </main>
 
