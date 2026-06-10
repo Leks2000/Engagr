@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Engagr WebBridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="bridge-card" aria-live="polite">
+      <header class="bridge-header">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img">
+              <rect width="48" height="48" rx="13" fill="#050505" />
+              <path d="M14 30.5c5.6-12.8 15.6-12.8 21.4-3.5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" />
+              <path d="M18.5 17.5 34 33" stroke="#fff" stroke-width="2.4" stroke-linecap="round" />
+              <circle cx="17" cy="18" r="4.2" fill="none" stroke="#fff" stroke-width="2.2" />
+            </svg>
+          </div>
+          <div>
+            <h1>Engagr WebBridge</h1>
+            <p id="activeTabLabel">Checking current tab…</p>
+          </div>
+        </div>
+
+        <div id="statusPill" class="status-pill is-checking">
+          <span class="status-dot"></span>
+          <span id="statusText">Checking</span>
+        </div>
+      </header>
+
+      <section class="connection-hero">
+        <div class="signal-orb" aria-hidden="true">
+          <svg viewBox="0 0 32 32">
+            <path d="M6 13.5a16 16 0 0 1 20 0" />
+            <path d="M10 18a9.5 9.5 0 0 1 12 0" />
+            <path d="M14 22.5a4 4 0 0 1 4 0" />
+            <circle cx="16" cy="26" r="1.7" />
+          </svg>
+        </div>
+        <h2 id="heroTitle">Desktop client connected</h2>
+        <p id="heroSubtitle">Browser assistant is ready</p>
+      </section>
+
+
+      <section class="parser-panel" aria-label="LinkedIn parser">
+        <div class="parser-header">
+          <div>
+            <h3>LinkedIn Parser</h3>
+            <p id="parserStatus">Scan the open LinkedIn feed for posts.</p>
+          </div>
+          <span id="parserCount" class="parser-count">0</span>
+        </div>
+        <button id="scanLinkedInButton" type="button" class="scan-button">Scan LinkedIn feed</button>
+        <div id="parsedPosts" class="parsed-posts" hidden></div>
+      </section>
+
+      <section class="settings-panel" aria-label="Bridge settings">
+        <label>
+          <span>Mini App URL</span>
+          <input id="miniAppUrl" type="url" placeholder="http://localhost:5173" autocomplete="off" />
+        </label>
+
+        <label>
+          <span>Telegram user ID</span>
+          <input id="telegramUserId" type="text" placeholder="required for AI comments" autocomplete="off" />
+        </label>
+
+        <label>
+          <span>Engagr API URL</span>
+          <input id="apiBaseUrl" type="url" placeholder="https://engagr-production.up.railway.app" autocomplete="off" />
+        </label>
+
+        <label>
+          <span>AI provider</span>
+          <select id="aiProvider">
+            <option value="groq">Groq (project default)</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+
+        <label class="toggle-row">
+          <span>Open LinkedIn after approval</span>
+          <input id="autoOpenLinkedIn" type="checkbox" />
+        </label>
+      </section>
+
+      <footer class="actions-row">
+        <button id="saveButton" type="button">Save settings</button>
+        <button id="checkButton" type="button" class="secondary">Check</button>
+      </footer>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
