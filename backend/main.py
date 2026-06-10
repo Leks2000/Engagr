@@ -32,6 +32,7 @@ import humanness_scorer
 import interaction_memory
 import invite_generator
 import daily_digest
+import ai_comment
 
 # ── Logging ───────────────────────────────────────────
 
@@ -145,6 +146,83 @@ def session_logs(user_id):
     try:
         return jsonify({"logs": sched_module.get_session_logs(user_id)})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+# ── Extension AI Endpoints ────────────────────────────
+
+@api.route("/api/extension/linkedin/comment/<user_id>", methods=["POST"])
+def extension_linkedin_comment(user_id):
+    """Generate AI comment variants for a LinkedIn post parsed by WebBridge."""
+    try:
+        data = request.get_json(silent=True) or {}
+        post_text = (data.get("post") or data.get("post_text") or "").strip()
+        author = (data.get("author") or "Unknown author").strip()
+        post_url = (data.get("url") or "").strip()
+
+        if not post_text:
+            return jsonify({"error": "Post text is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
+        comment_data = ai_comment.generate_comment_variants(
+            post_text,
+            user_language=user_language,
+            platform="linkedin",
+            tone=tone,
+        )
+        variants = comment_data.get("variants") or []
+        selected = variants[0] if variants else ""
+
+        return jsonify({
+            "status": "generated",
+            "provider": "groq",
+            "platform": "linkedin",
+            "author": author,
+            "post_url": post_url,
+            "variants": variants,
+            "selected_comment": selected,
+            "comment": selected,
+            "post_language": comment_data.get("post_language", "en"),
+            "translations": comment_data.get("translations"),
+        })
+    except Exception as e:
+        logger.error("Extension LinkedIn comment generation failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/linkedin/regenerate/<user_id>", methods=["POST"])
+def extension_linkedin_regenerate(user_id):
+    """Regenerate one AI comment for a LinkedIn post parsed by WebBridge."""
+    try:
+        data = request.get_json(silent=True) or {}
+        post_text = (data.get("post") or data.get("post_text") or "").strip()
+        previous_comment = (data.get("previous_comment") or "").strip()
+
+        if not post_text:
+            return jsonify({"error": "Post text is required"}), 400
+
+        settings = storage.get_settings(user_id)
+        tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
+        new_comment = ai_comment.regenerate_comment(
+            post_text,
+            previous_comment,
+            platform="linkedin",
+            tone=tone,
+        )
+
+        return jsonify({
+            "status": "regenerated",
+            "provider": "groq",
+            "platform": "linkedin",
+            "variants": [new_comment],
+            "selected_comment": new_comment,
+            "comment": new_comment,
+        })
+    except Exception as e:
+        logger.error("Extension LinkedIn comment regeneration failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500
 
 

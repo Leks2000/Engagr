@@ -42,7 +42,8 @@ The project currently uses Groq in the backend AI comment module, so the extensi
 6. Pin **Engagr WebBridge** in the browser toolbar.
 7. Open the popup and set:
    - Mini App URL: `http://localhost:5173` for local Vite development.
-   - Telegram user ID: optional in v0.1.
+   - Telegram user ID: required for AI comment generation.
+   - Engagr API URL: `https://engagr-production.up.railway.app` or your local API.
    - AI provider: `Groq` for the current project default.
 8. Click **Save settings** or **Check**.
 

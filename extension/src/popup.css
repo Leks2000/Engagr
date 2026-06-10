@@ -248,3 +248,142 @@ button.secondary {
 #saveButton {
   flex: 1;
 }
+
+.parser-panel {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #cfeee2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f4fffa 0%, #ffffff 100%);
+}
+
+.parser-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.parser-header h3 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.parser-header p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.parser-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.scan-button {
+  width: 100%;
+  background: var(--green);
+}
+
+.parsed-posts {
+  display: grid;
+  gap: 9px;
+  max-height: 156px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.parsed-post-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.parsed-post-card strong {
+  font-size: 12px;
+}
+
+.parsed-post-card p {
+  display: -webkit-box;
+  color: #4d4a48;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.parsed-post-card a {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+}
+
+.ai-comment {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 10px;
+  background: #effdf6;
+  border: 1px solid #c9f8df;
+}
+
+.ai-comment span,
+.variant-count {
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ai-comment p {
+  display: block;
+  color: #17463c;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.variant-count {
+  color: #6d7773;
+  text-transform: none;
+}
+
+.post-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mini-action {
+  min-height: 28px;
+  border-radius: 9px;
+  background: #edf7f3;
+  color: var(--green);
+  font-size: 11px;
+  padding: 0 10px;
+}

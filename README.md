@@ -133,6 +133,7 @@ engagr/
 │   │   ├── popup.html
 │   │   ├── popup.css
 │   │   ├── popup.js
+│   │   ├── linkedin_parser.js
 │   │   └── background.js
 ├── frontend/
 │   ├── src/
@@ -177,9 +178,9 @@ Engagr WebBridge]
 
 | Step | Status | Scope | Result |
 |------|--------|-------|--------|
-| 1. Extension | ✅ Started | Manifest V3, popup UI, settings, `chrome.storage`, connection check | `extension/` contains Engagr WebBridge v0.1 shell |
-| 2. LinkedIn Parser | ⏳ Next | Read feed posts, author, post URL, post text | `{ "author": "...", "post": "...", "url": "..." }` |
-| 3. AI Comments | ⏳ Planned | Use current project AI provider flow, regenerate comment | Post → AI comment |
+| 1. Extension | ✅ Done | Manifest V3, popup UI, settings, `chrome.storage`, connection check | `extension/` contains Engagr WebBridge shell |
+| 2. LinkedIn Parser | ✅ Done | Read feed posts, author, post URL, post text | Popup scan returns `{ "author": "...", "post": "...", "url": "..." }` |
+| 3. AI Comments | ✅ Started | Use current Groq provider flow, generate/regenerate comment | Parsed LinkedIn post → AI comment variants |
 | 4. Mini App | ⏳ Planned | Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings | Control center |
 | 5. Approval Queue | ⏳ Planned | Approve, edit, skip, regenerate | Human-reviewed queue |
 | 6. LinkedIn Actions | ⏳ Planned | Insert prepared comment, like, connect, connect message | Manual final publish flow |

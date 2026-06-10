@@ -1,5 +1,6 @@
 const DEFAULT_SETTINGS = {
   miniAppUrl: 'http://localhost:5173',
+  apiBaseUrl: 'https://engagr-production.up.railway.app',
   telegramUserId: '',
   aiProvider: 'groq',
   autoOpenLinkedIn: true,
