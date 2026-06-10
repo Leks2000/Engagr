@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
+
 const I18N = {
   en: {
     title: 'Control Center',
@@ -28,6 +30,14 @@ const I18N = {
     active: 'Active',
     paused: 'Paused',
     userId: 'Telegram user ID',
+    extensionTitle: 'Chrome Extension login',
+    extensionText: 'Generate a 5-minute code, paste it into Engagr WebBridge on your PC, then click Connect.',
+    generateCode: 'Generate login code',
+    generating: 'Generating...',
+    copy: 'Copy',
+    copied: 'Copied',
+    codeExpires: 'Expires in 5 minutes. Do not paste your Telegram user ID into the extension.',
+    codeError: 'Could not generate code. Check backend connection.',
     safety: 'Safety rules',
     safetyText: 'The current MVP keeps final publishing human-controlled. Use moderate daily limits and review every action before posting.',
     saved: 'Saved',
@@ -59,6 +69,14 @@ const I18N = {
     active: 'Активна',
     paused: 'Пауза',
     userId: 'Telegram user ID',
+    extensionTitle: 'Вход в Chrome Extension',
+    extensionText: 'Сгенерируй код на 5 минут, вставь его в Engagr WebBridge на ПК и нажми Connect.',
+    generateCode: 'Сгенерировать код',
+    generating: 'Генерирую...',
+    copy: 'Копировать',
+    copied: 'Скопировано',
+    codeExpires: 'Действует 5 минут. Не вставляй Telegram user ID в расширение.',
+    codeError: 'Не удалось создать код. Проверь backend.',
     safety: 'Правила безопасности',
     safetyText: 'В текущем MVP финальная публикация остаётся под контролем человека. Используйте умеренные дневные лимиты и проверяйте каждое действие перед публикацией.',
     saved: 'Сохранено',
@@ -90,6 +108,14 @@ const I18N = {
     active: 'Activa',
     paused: 'Pausada',
     userId: 'Telegram user ID',
+    extensionTitle: 'Inicio de Chrome Extension',
+    extensionText: 'Genera un código de 5 minutos, pégalo en Engagr WebBridge en tu PC y pulsa Connect.',
+    generateCode: 'Generar código',
+    generating: 'Generando...',
+    copy: 'Copiar',
+    copied: 'Copiado',
+    codeExpires: 'Caduca en 5 minutos. No pegues tu Telegram user ID en la extensión.',
+    codeError: 'No se pudo generar el código. Revisa el backend.',
     safety: 'Reglas de seguridad',
     safetyText: 'El MVP mantiene la publicación final bajo control humano. Usa límites moderados y revisa cada acción antes de publicar.',
     saved: 'Guardado',
@@ -121,6 +147,14 @@ const I18N = {
     active: 'Aktiv',
     paused: 'Pausiert',
     userId: 'Telegram user ID',
+    extensionTitle: 'Chrome Extension Login',
+    extensionText: 'Erzeuge einen 5-Minuten-Code, füge ihn am PC in Engagr WebBridge ein und klicke Connect.',
+    generateCode: 'Login-Code erzeugen',
+    generating: 'Wird erzeugt...',
+    copy: 'Kopieren',
+    copied: 'Kopiert',
+    codeExpires: 'Läuft in 5 Minuten ab. Nicht die Telegram user ID in die Extension einfügen.',
+    codeError: 'Code konnte nicht erzeugt werden. Backend prüfen.',
     safety: 'Sicherheitsregeln',
     safetyText: 'Im aktuellen MVP bleibt die finale Veröffentlichung menschlich kontrolliert. Nutze moderate Tageslimits und prüfe jede Aktion vor dem Posten.',
     saved: 'Gespeichert',
@@ -137,6 +171,10 @@ const LANGUAGE_OPTIONS = [
 export default function ControlCenter({ userId, settings, language = 'en', onSettingsUpdate, onNavigate }) {
   const t = I18N[language] || I18N.en
   const [savingField, setSavingField] = useState('')
+  const [extensionCode, setExtensionCode] = useState('')
+  const [extensionError, setExtensionError] = useState('')
+  const [extensionLoading, setExtensionLoading] = useState(false)
+  const [codeCopied, setCodeCopied] = useState(false)
   const sessionActive = settings?.session_active !== false
 
   const workspaceCards = useMemo(() => ([
@@ -190,6 +228,38 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
       await onSettingsUpdate(payload)
     } finally {
       setTimeout(() => setSavingField(''), 700)
+    }
+  }
+
+  const generateExtensionCode = async () => {
+    setExtensionLoading(true)
+    setExtensionError('')
+    setCodeCopied(false)
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/extension-login-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok || !body.code) throw new Error(body.error || 'code_failed')
+      setExtensionCode(body.code)
+    } catch {
+      setExtensionCode('')
+      setExtensionError(t.codeError)
+    } finally {
+      setExtensionLoading(false)
+    }
+  }
+
+  const copyExtensionCode = async () => {
+    if (!extensionCode) return
+    try {
+      await navigator.clipboard.writeText(extensionCode)
+      setCodeCopied(true)
+      setTimeout(() => setCodeCopied(false), 1500)
+    } catch {
+      setExtensionError(extensionCode)
     }
   }
 
@@ -250,6 +320,26 @@ export default function ControlCenter({ userId, settings, language = 'en', onSet
       <div className="card mb-4 control-settings-card">
         <p className="text-xs font-semibold mb-1">{t.userId}</p>
         <code className="control-user-id">{userId}</code>
+      </div>
+
+      <div className="card mb-4 control-settings-card">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <p className="text-xs font-semibold">🔌 {t.extensionTitle}</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>{t.extensionText}</p>
+          </div>
+          <button className="btn btn-sm" type="button" onClick={generateExtensionCode} disabled={extensionLoading}>
+            {extensionLoading ? t.generating : t.generateCode}
+          </button>
+        </div>
+        {extensionCode && (
+          <div className="extension-code-box">
+            <code>{extensionCode}</code>
+            <button className="btn btn-sm" type="button" onClick={copyExtensionCode}>{codeCopied ? t.copied : t.copy}</button>
+          </div>
+        )}
+        {extensionCode && <p className="text-xs mt-2" style={{ color: 'var(--color-warning)' }}>{t.codeExpires}</p>}
+        {extensionError && <p className="text-xs mt-2" style={{ color: 'var(--color-danger)' }}>{extensionError}</p>}
       </div>
 
       <div className="card mb-6 control-safety-card">

@@ -365,16 +365,28 @@ def generate_x_reply(
             "provider": "stub",
         }
 
-    platform_context = "X/Twitter reply — short, punchy, conversational tone. Max 240 chars. No hashtag spam. No generic praise."
-    return generate_comment_variants(
-        post_text=post_text,
-        author=post_author,
+    # Reuse the shared AI comment generator. Its public signature is intentionally
+    # small, so include the author/URL as prompt context instead of passing
+    # unsupported keyword arguments.
+    context_post = post_text
+    if post_author:
+        context_post = f"Author: {post_author}\n{context_post}"
+    if post_url:
+        context_post = f"{context_post}\nURL: {post_url}"
+
+    result = generate_comment_variants(
+        post_text=context_post,
+        user_language=language,
         platform="x",
-        user_memory=user_memory,
-        groq_api_key=groq_api_key,
-        extra_context=platform_context,
-        language=language,
+        tone=(user_memory or {}).get("tone", "friendly"),
     )
+    variants = result.get("variants") or []
+    return {
+        **result,
+        "variants": variants,
+        "selected_comment": variants[0] if variants else "",
+        "provider": "groq" if groq_api_key else result.get("provider", "shared_ai"),
+    }
 
 
 def generate_x_thread(

@@ -48,6 +48,11 @@ def get_memory(user_id: str) -> dict:
     return dict(DEFAULT_MEMORY)
 
 
+def load_memory(user_id: str) -> dict:
+    """Backward-compatible alias for get_memory."""
+    return get_memory(user_id)
+
+
 def save_memory(user_id: str, memory: dict) -> dict:
     """Save or update user memory profile."""
     path = _memory_path(user_id)

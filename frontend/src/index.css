@@ -876,3 +876,22 @@ button.control-card:hover {
   min-height: 56px;
   line-height: 1.5;
 }
+
+.extension-code-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.extension-code-box code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #0f172a;
+}

@@ -1775,7 +1775,7 @@ def x_generate_reply(user_id):
             return jsonify({"error": "post_text is required"}), 400
 
         settings = storage.load_settings(user_id) or {}
-        memory = user_memory.load_memory(user_id)
+        memory = user_memory.get_memory(user_id)
         groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
 
         result = twitter_bot.generate_x_reply(
@@ -1818,7 +1818,7 @@ def x_generate_thread(user_id):
             return jsonify({"error": "topic is required"}), 400
 
         settings = storage.load_settings(user_id) or {}
-        memory = user_memory.load_memory(user_id)
+        memory = user_memory.get_memory(user_id)
         groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
 
         result = twitter_bot.generate_x_thread(
