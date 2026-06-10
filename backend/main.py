@@ -308,6 +308,74 @@ def extension_linkedin_queue(user_id):
         return jsonify({"error": str(e)}), 500
 
 
+@api.route("/api/extension/linkedin/actions/<user_id>", methods=["GET"])
+def extension_linkedin_actions(user_id):
+    """Approved extension-sourced LinkedIn items waiting for browser-side execution."""
+    try:
+        queue = storage.get_queue(user_id)
+        actions = [
+            q for q in queue
+            if q.get("source") == "extension"
+            and q.get("platform") == "linkedin"
+            and q.get("status") == "approved"
+        ]
+        return jsonify({"actions": actions, "count": len(actions)})
+    except Exception as e:
+        logger.error("Extension LinkedIn actions list failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/linkedin/actions/<user_id>/<item_id>/complete", methods=["POST"])
+def extension_linkedin_action_complete(user_id, item_id):
+    """Mark an approved extension item as published manually by the user in the browser."""
+    try:
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+
+        action = item.get("action", "comment")
+        stat_key = {
+            "comment": "linkedin_comments",
+            "like": "linkedin_likes",
+            "connect": "linkedin_adds",
+        }.get(action, "linkedin_comments")
+        storage.increment_stat(user_id, stat_key)
+
+        try:
+            interaction_memory.record_interaction(
+                user_id=user_id,
+                author_name=item.get("author", "") or item.get("author_name", ""),
+                author_profile_url=item.get("post_url", ""),
+                platform="linkedin",
+                interaction_type=action,
+                post_url=item.get("post_url", ""),
+                our_message=item.get("selected_comment") or item.get("comment", ""),
+            )
+        except Exception as e:
+            logger.error("Failed to record extension interaction: %s", e)
+
+        storage.remove_from_queue(user_id, item_id)
+        return jsonify({"status": "completed", "action": action})
+    except Exception as e:
+        logger.error("Extension LinkedIn action complete failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/linkedin/actions/<user_id>/<item_id>/dismiss", methods=["POST"])
+def extension_linkedin_action_dismiss(user_id, item_id):
+    """Dismiss an approved extension item without publishing."""
+    try:
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+
+        storage.remove_from_queue(user_id, item_id)
+        return jsonify({"status": "dismissed"})
+    except Exception as e:
+        logger.error("Extension LinkedIn action dismiss failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Queue Endpoints ───────────────────────────────────
 
 @api.route("/api/queue/<user_id>", methods=["GET"])
@@ -326,6 +394,17 @@ def approve_item(user_id, item_id):
         item = storage.get_queue_item(user_id, item_id)
         if not item:
             return jsonify({"error": "Item not found"}), 404
+
+        if item.get("source") == "extension":
+            # Extension-found items are executed in the user's own browser via
+            # the WebBridge extension. The human performs the final publish,
+            # so no server-side automated posting is scheduled here.
+            storage.update_queue_item(user_id, item_id, {
+                "status": "approved",
+                "execution": "extension",
+                "approved_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return jsonify({"status": "approved", "execution": "extension"})
 
         storage.update_queue_item(user_id, item_id, {"status": "approved"})
 

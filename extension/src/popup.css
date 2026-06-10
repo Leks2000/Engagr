@@ -388,6 +388,53 @@ button:disabled {
   padding: 0 10px;
 }
 
+.actions-panel {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #d7e6fb;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f5f9ff 0%, #ffffff 100%);
+}
+
+.actions-panel .parser-count {
+  background: #e3eefe;
+  color: var(--blue);
+}
+
+.actions-panel .scan-button {
+  background: var(--blue);
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-buttons .mini-action[data-primary='true'] {
+  background: var(--blue);
+  color: #fff;
+}
+
+.action-buttons .mini-action[data-done='true'] {
+  background: #effdf6;
+  color: var(--green);
+}
+
+.action-badge {
+  display: inline-block;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e3eefe;
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .auto-sync-panel {
   margin-top: 0;
 }

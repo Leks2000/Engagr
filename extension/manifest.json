@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Engagr WebBridge",
   "description": "Personal Chrome bridge for Engagr Mini App workflows.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "action": {
     "default_title": "Engagr WebBridge",
     "default_popup": "src/popup.html"
@@ -32,7 +32,8 @@
         "https://linkedin.com/*"
       ],
       "js": [
-        "src/linkedin_parser.js"
+        "src/linkedin_parser.js",
+        "src/linkedin_actions.js"
       ],
       "run_at": "document_idle"
     },

@@ -35,6 +35,54 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  if (message?.type === 'ENGAGR_OPEN_AND_PREPARE') {
+    const payload = message.payload || {}
+    const targetUrl = String(payload.url || '').trim()
+    const actionMessage = payload.actionMessage || null
+
+    if (!targetUrl || !actionMessage) {
+      sendResponse({ ok: false, error: 'Missing URL or action.' })
+      return false
+    }
+
+    chrome.tabs.create({ url: targetUrl, active: true }, (tab) => {
+      if (!tab?.id) {
+        sendResponse({ ok: false, error: 'Could not open LinkedIn tab.' })
+        return
+      }
+
+      const tabId = tab.id
+      let settled = false
+
+      const finish = (result) => {
+        if (settled) return
+        settled = true
+        chrome.tabs.onUpdated.removeListener(onUpdated)
+        sendResponse(result)
+      }
+
+      const onUpdated = (updatedTabId, changeInfo) => {
+        if (updatedTabId !== tabId || changeInfo.status !== 'complete') return
+
+        // Give LinkedIn's SPA a moment to hydrate before messaging the content script.
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tabId, actionMessage, (response) => {
+            if (chrome.runtime.lastError) {
+              finish({ ok: false, error: 'LinkedIn page is not ready. Reload it and use the popup action again.' })
+              return
+            }
+            finish(response || { ok: false, error: 'No response from LinkedIn page.' })
+          })
+        }, 2500)
+      }
+
+      chrome.tabs.onUpdated.addListener(onUpdated)
+      setTimeout(() => finish({ ok: false, error: 'Timed out waiting for the LinkedIn page.' }), 30000)
+    })
+
+    return true
+  }
+
   if (message?.type === 'ENGAGR_SYNC_MINI_APP_CONTEXT') {
     const payload = message.payload || {}
     const miniAppUrl = typeof payload.miniAppUrl === 'string' ? payload.miniAppUrl : ''

@@ -21,6 +21,10 @@ const elements = {
   parserStatus: document.querySelector('#parserStatus'),
   parserCount: document.querySelector('#parserCount'),
   parsedPosts: document.querySelector('#parsedPosts'),
+  actionsStatus: document.querySelector('#actionsStatus'),
+  actionsCount: document.querySelector('#actionsCount'),
+  approvedActions: document.querySelector('#approvedActions'),
+  refreshActionsButton: document.querySelector('#refreshActionsButton'),
   syncSummary: document.querySelector('#syncSummary'),
   syncedUserId: document.querySelector('#syncedUserId'),
   syncedKeywords: document.querySelector('#syncedKeywords'),
@@ -281,6 +285,145 @@ async function enqueueReadyPosts(limit = 3) {
 }
 
 
+let approvedActions = []
+
+function actionLabel(action) {
+  if (action === 'like') return 'Like'
+  if (action === 'connect') return 'Connect'
+  return 'Comment'
+}
+
+function renderApprovedActions() {
+  elements.actionsCount.textContent = String(approvedActions.length)
+  elements.approvedActions.hidden = approvedActions.length === 0
+
+  if (!approvedActions.length) {
+    elements.approvedActions.innerHTML = ''
+    return
+  }
+
+  elements.approvedActions.innerHTML = approvedActions.slice(0, 5).map((item, index) => {
+    const comment = item.selected_comment || item.comment || ''
+    const action = item.action || 'comment'
+
+    return `
+      <article class="parsed-post-card">
+        <span class="action-badge">${escapeHtml(actionLabel(action))}</span>
+        <strong>${escapeHtml(item.author || 'Unknown author')}</strong>
+        <p>${escapeHtml(item.post_excerpt || item.post_text || '')}</p>
+        ${comment ? `<div class="ai-comment"><span>Approved comment</span><p>${escapeHtml(comment)}</p></div>` : ''}
+        <div class="post-actions action-buttons">
+          <button type="button" class="mini-action" data-primary="true" data-execute-index="${index}">Open &amp; prepare</button>
+          <button type="button" class="mini-action" data-done="true" data-complete-index="${index}">Posted ✓</button>
+          <button type="button" class="mini-action" data-dismiss-index="${index}">Dismiss</button>
+        </div>
+      </article>
+    `
+  }).join('')
+}
+
+async function loadApprovedActions({ silent = false } = {}) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId.trim()
+
+  if (!userId) {
+    if (!silent) elements.actionsStatus.textContent = 'Open the Mini App once so the bridge can sync your Telegram user ID.'
+    return
+  }
+
+  if (!silent) elements.actionsStatus.textContent = 'Loading approved actions…'
+
+  try {
+    const data = await getJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}`, settings))
+    approvedActions = Array.isArray(data?.actions) ? data.actions : []
+    renderApprovedActions()
+    elements.actionsStatus.textContent = approvedActions.length
+      ? `${approvedActions.length} approved action${approvedActions.length === 1 ? '' : 's'} ready for your browser.`
+      : 'No approved actions yet. Approve queue items in the Mini App first.'
+  } catch (error) {
+    if (!silent) elements.actionsStatus.textContent = error.message || 'Failed to load approved actions.'
+  }
+}
+
+function actionMessageFor(item) {
+  const action = item.action || 'comment'
+  const comment = item.selected_comment || item.comment || ''
+
+  if (action === 'like') {
+    return { type: 'ENGAGR_LIKE_POST', payload: { url: item.post_url } }
+  }
+
+  if (action === 'connect') {
+    return { type: 'ENGAGR_PREPARE_CONNECT', payload: { url: item.post_url, message: comment } }
+  }
+
+  return { type: 'ENGAGR_PREPARE_COMMENT', payload: { url: item.post_url, comment } }
+}
+
+async function executeApprovedAction(index) {
+  const item = approvedActions[index]
+  if (!item) return
+
+  if (!item.post_url) {
+    elements.actionsStatus.textContent = 'This item has no LinkedIn URL; dismiss it and re-scan.'
+    return
+  }
+
+  elements.actionsStatus.textContent = 'Opening LinkedIn and preparing the action…'
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'ENGAGR_OPEN_AND_PREPARE',
+      payload: {
+        url: item.post_url,
+        actionMessage: actionMessageFor(item),
+      },
+    })
+
+    elements.actionsStatus.textContent = response?.ok
+      ? response.note || 'Action prepared. Finish it manually in the LinkedIn tab.'
+      : response?.error || 'Could not prepare the action. Do it manually in the opened tab.'
+  } catch {
+    elements.actionsStatus.textContent = 'Could not reach the LinkedIn tab. Finish the action manually.'
+  }
+}
+
+async function completeApprovedAction(index) {
+  const item = approvedActions[index]
+  if (!item) return
+
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId.trim()
+  if (!userId) return
+
+  try {
+    await postJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}/${encodeURIComponent(item.id)}/complete`, settings), {})
+    approvedActions.splice(index, 1)
+    renderApprovedActions()
+    elements.actionsStatus.textContent = 'Marked as posted. Stats updated in Engagr.'
+  } catch (error) {
+    elements.actionsStatus.textContent = error.message || 'Failed to mark the action as posted.'
+  }
+}
+
+async function dismissApprovedAction(index) {
+  const item = approvedActions[index]
+  if (!item) return
+
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId.trim()
+  if (!userId) return
+
+  try {
+    await postJson(apiUrl(`/api/extension/linkedin/actions/${encodeURIComponent(userId)}/${encodeURIComponent(item.id)}/dismiss`, settings), {})
+    approvedActions.splice(index, 1)
+    renderApprovedActions()
+    elements.actionsStatus.textContent = 'Action dismissed.'
+  } catch (error) {
+    elements.actionsStatus.textContent = error.message || 'Failed to dismiss the action.'
+  }
+}
+
 async function scanLinkedInFeed({ auto = false } = {}) {
   elements.scanLinkedInButton.disabled = true
   elements.parserStatus.textContent = auto ? 'Auto-scanning LinkedIn with Mini App settings…' : 'Scanning active LinkedIn tab…'
@@ -352,6 +495,25 @@ async function checkConnection(settings = null) {
 
 elements.checkButton.addEventListener('click', () => checkConnection().then(() => scanLinkedInFeed({ auto: true })))
 elements.scanLinkedInButton.addEventListener('click', () => scanLinkedInFeed())
+elements.refreshActionsButton.addEventListener('click', () => loadApprovedActions())
+elements.approvedActions.addEventListener('click', (event) => {
+  const executeButton = event.target.closest('[data-execute-index]')
+  if (executeButton) {
+    executeApprovedAction(Number(executeButton.dataset.executeIndex))
+    return
+  }
+
+  const completeButton = event.target.closest('[data-complete-index]')
+  if (completeButton) {
+    completeApprovedAction(Number(completeButton.dataset.completeIndex))
+    return
+  }
+
+  const dismissButton = event.target.closest('[data-dismiss-index]')
+  if (dismissButton) {
+    dismissApprovedAction(Number(dismissButton.dataset.dismissIndex))
+  }
+})
 elements.parsedPosts.addEventListener('click', (event) => {
   const button = event.target.closest('[data-generate-index]')
   if (!button) return
@@ -365,6 +527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderActiveTab()
   await loadParsedPosts()
   await checkConnection(settings)
+  await loadApprovedActions({ silent: true })
 
   const tab = await getActiveTab().catch(() => null)
   if (settings.autoScanLinkedIn && isLinkedInUrl(tab?.url)) {

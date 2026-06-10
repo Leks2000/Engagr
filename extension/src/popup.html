@@ -56,6 +56,18 @@
         <div id="parsedPosts" class="parsed-posts" hidden></div>
       </section>
 
+      <section class="actions-panel" aria-label="Approved LinkedIn actions">
+        <div class="parser-header">
+          <div>
+            <h3>Approved Actions</h3>
+            <p id="actionsStatus">Approve posts in the Mini App, then execute them here.</p>
+          </div>
+          <span id="actionsCount" class="parser-count">0</span>
+        </div>
+        <button id="refreshActionsButton" type="button" class="scan-button">Load approved actions</button>
+        <div id="approvedActions" class="parsed-posts" hidden></div>
+      </section>
+
       <section class="settings-panel auto-sync-panel" aria-label="Mini App sync status">
         <div>
           <h3>Mini App Sync</h3>
