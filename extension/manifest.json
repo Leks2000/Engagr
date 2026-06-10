@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Engagr WebBridge",
+  "description": "Personal Chrome bridge for Engagr Mini App workflows.",
+  "version": "0.1.0",
+  "action": {
+    "default_title": "Engagr WebBridge",
+    "default_popup": "src/popup.html"
+  },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://linkedin.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*.vercel.app/*",
+    "https://*.railway.app/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  }
+}

@@ -127,6 +127,13 @@ engagr/
 │   ├── scheduler.py
 │   ├── telegram_bot.py
 │   └── setup.py
+├── extension/
+│   ├── manifest.json
+│   ├── src/
+│   │   ├── popup.html
+│   │   ├── popup.css
+│   │   ├── popup.js
+│   │   └── background.js
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
@@ -141,6 +148,51 @@ engagr/
 
 ---
 
+
+
+## Personal MVP Architecture (Extension-first)
+
+For the current personal MVP, Engagr is intentionally moving toward a lightweight browser bridge instead of a full server-heavy automation stack.
+
+```mermaid
+flowchart TD
+    TMA[Telegram Mini App
+Approve / Edit / Skip / Regenerate] --> EXT[Chrome Extension
+Engagr WebBridge]
+    EXT --> LI[LinkedIn]
+    EXT -. later .-> RD[Reddit]
+    EXT -. later .-> X[X / Twitter]
+```
+
+### What we deliberately avoid in the personal MVP
+
+- No extra backend owned by the extension.
+- No extension database.
+- No Docker requirement for browser workflows.
+- No separate extension user authorization.
+- No multi-account mode.
+- No automatic final publish in v0.1; the human stays in control.
+
+### MVP 10 Steps
+
+| Step | Status | Scope | Result |
+|------|--------|-------|--------|
+| 1. Extension | ✅ Started | Manifest V3, popup UI, settings, `chrome.storage`, connection check | `extension/` contains Engagr WebBridge v0.1 shell |
+| 2. LinkedIn Parser | ⏳ Next | Read feed posts, author, post URL, post text | `{ "author": "...", "post": "...", "url": "..." }` |
+| 3. AI Comments | ⏳ Planned | Use current project AI provider flow, regenerate comment | Post → AI comment |
+| 4. Mini App | ⏳ Planned | Dashboard, LinkedIn, Reddit, X, Queue, Ideas, Settings | Control center |
+| 5. Approval Queue | ⏳ Planned | Approve, edit, skip, regenerate | Human-reviewed queue |
+| 6. LinkedIn Actions | ⏳ Planned | Insert prepared comment, like, connect, connect message | Manual final publish flow |
+| 7. Reddit | ⏳ Later | Search posts/subreddits, comments, upvote | Reddit workflow parity |
+| 8. User Memory | ⏳ Later | Project, audience, goal, tone profile | Personalized comments |
+| 9. Ideas Engine | ⏳ Later | AI/dev/startup news collection | Content ideas and comment ideas |
+| 10. X / Twitter | ⏳ Later | Trends, replies, post ideas, threads | X workflow parity |
+
+The immediate MVP target is steps 1–6: open Telegram, review a found post, approve or edit the generated answer, open LinkedIn, and let the extension prepare the browser-side action while you decide the final submit.
+
+See [`EXTENSION_GUIDE.md`](EXTENSION_GUIDE.md) and [`extension/README.md`](extension/README.md) for local installation and release notes.
+
+---
 
 ## Project Architecture Flowchart
 
