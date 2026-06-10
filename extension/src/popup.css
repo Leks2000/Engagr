@@ -387,3 +387,47 @@ button:disabled {
   font-size: 11px;
   padding: 0 10px;
 }
+
+.auto-sync-panel {
+  margin-top: 0;
+}
+
+.auto-sync-panel h3 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.auto-sync-panel p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.sync-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.sync-details span {
+  color: var(--muted);
+}
+
+.sync-details strong {
+  max-width: 210px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
