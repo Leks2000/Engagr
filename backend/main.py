@@ -9,6 +9,7 @@ import asyncio
 import logging
 import threading
 import fcntl
+import uuid
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -223,6 +224,87 @@ def extension_linkedin_regenerate(user_id):
         })
     except Exception as e:
         logger.error("Extension LinkedIn comment regeneration failed user=%s err=%s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/linkedin/queue/<user_id>", methods=["POST"])
+def extension_linkedin_queue(user_id):
+    """Add WebBridge-parsed LinkedIn posts with AI comments to the approval queue."""
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_posts = data.get("posts") if isinstance(data.get("posts"), list) else [data]
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        queue = storage.get_queue(user_id)
+        existing_keys = {
+            (
+                q.get("platform"),
+                q.get("action"),
+                q.get("post_url") or q.get("post_id") or q.get("post_text", "")[:160],
+            )
+            for q in queue
+            if q.get("status") == "pending"
+        }
+
+        queued_items = []
+        skipped = 0
+
+        for raw in raw_posts:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
+
+            post_text = (raw.get("post") or raw.get("post_text") or "").strip()
+            post_url = (raw.get("url") or raw.get("post_url") or "").strip()
+            author = (raw.get("author") or raw.get("author_name") or "Unknown author").strip()
+            ai_payload = raw.get("aiComment") or raw.get("ai_comment") or {}
+            variants = ai_payload.get("variants") or raw.get("comment_variants") or []
+            selected = (
+                ai_payload.get("selected_comment")
+                or raw.get("selected_comment")
+                or raw.get("comment")
+                or (variants[0] if variants else "")
+            )
+
+            if not post_text or not selected:
+                skipped += 1
+                continue
+
+            dedupe_key = ("linkedin", "comment", post_url or post_text[:160])
+            if dedupe_key in existing_keys:
+                skipped += 1
+                continue
+
+            item = {
+                "id": str(uuid.uuid4()),
+                "platform": "linkedin",
+                "action": "comment",
+                "source": "extension",
+                "post_id": raw.get("post_id") or post_url or post_text[:80],
+                "post_url": post_url,
+                "post_excerpt": raw.get("post_excerpt") or post_text[:200],
+                "post_text": post_text,
+                "author": author,
+                "comment": selected,
+                "selected_comment": selected,
+                "comment_variants": variants or [selected],
+                "post_language": ai_payload.get("post_language") or raw.get("post_language", "en"),
+                "user_language": user_language,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            storage.add_to_queue(user_id, item)
+            existing_keys.add(dedupe_key)
+            queued_items.append(item)
+
+        return jsonify({
+            "status": "queued",
+            "queued": len(queued_items),
+            "skipped": skipped,
+            "items": queued_items,
+        })
+    except Exception as e:
+        logger.error("Extension LinkedIn queue failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500
 
 

@@ -257,6 +257,30 @@ async function generateMissingComments(limit = 3) {
   }
 }
 
+
+async function enqueueReadyPosts(limit = 3) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId.trim()
+  if (!userId) return { queued: 0, skipped: 0 }
+
+  const stored = await chrome.storage.local.get(['linkedinParsedPosts', 'linkedinQueuedPostKeys'])
+  const alreadyQueued = new Set(stored.linkedinQueuedPostKeys || [])
+  const posts = (stored.linkedinParsedPosts || [])
+    .filter((post) => selectedComment(post))
+    .filter((post) => !alreadyQueued.has(post.url || `${post.author}:${post.post?.slice(0, 120)}`))
+    .slice(0, limit)
+
+  if (!posts.length) return { queued: 0, skipped: 0 }
+
+  const data = await postJson(apiUrl(`/api/extension/linkedin/queue/${encodeURIComponent(userId)}`, settings), { posts })
+  for (const post of posts) {
+    alreadyQueued.add(post.url || `${post.author}:${post.post?.slice(0, 120)}`)
+  }
+  await chrome.storage.local.set({ linkedinQueuedPostKeys: [...alreadyQueued] })
+  return data
+}
+
+
 async function scanLinkedInFeed({ auto = false } = {}) {
   elements.scanLinkedInButton.disabled = true
   elements.parserStatus.textContent = auto ? 'Auto-scanning LinkedIn with Mini App settings…' : 'Scanning active LinkedIn tab…'
@@ -290,7 +314,10 @@ async function scanLinkedInFeed({ auto = false } = {}) {
     }
 
     await generateMissingComments(3)
-    elements.parserStatus.textContent = `Ready: ${posts.length} matched post${posts.length === 1 ? '' : 's'} from Mini App settings.`
+    const queueResult = await enqueueReadyPosts(3)
+    elements.parserStatus.textContent = queueResult.queued > 0
+      ? `Queued ${queueResult.queued} post${queueResult.queued === 1 ? '' : 's'} for Mini App approval.`
+      : `Ready: ${posts.length} matched post${posts.length === 1 ? '' : 's'} from Mini App settings.`
   } catch {
     elements.parserStatus.textContent = 'Parser is not ready. Reload the LinkedIn tab and try again.'
   } finally {

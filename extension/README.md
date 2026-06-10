@@ -11,6 +11,7 @@ Personal Chrome Extension MVP for connecting browser workflows with the Engagr T
 - Active-tab LinkedIn detection.
 - Read-only LinkedIn feed parser that extracts author, post text, and post URL.
 - AI comment generation/regeneration for parsed LinkedIn posts through the Engagr API.
+- Automatic queue handoff from matched LinkedIn posts to the Mini App approval queue.
 
 ## Non-goals for v0.1
 
@@ -53,7 +54,7 @@ POST /api/extension/linkedin/comment/<user_id>
 POST /api/extension/linkedin/regenerate/<user_id>
 ```
 
-Returned comments are saved in `chrome.storage.local` next to the parsed post preview. The extension still does not publish anything automatically.
+Returned comments are saved in `chrome.storage.local` next to the parsed post preview, then matched posts can be pushed into the Mini App approval queue. The extension still does not publish anything automatically.
 
 
 ## Mini App sync
