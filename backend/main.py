@@ -1761,7 +1761,7 @@ def get_ideas_stats(user_id):
 def x_trends(user_id):
     """Get trending X/Twitter topics, enriched with AI angles."""
     try:
-        settings = storage.load_settings(user_id) or {}
+        settings = storage.get_settings(user_id) or {}
         x_settings = settings.get("x", {})
         keywords = x_settings.get("keywords", [])
         bearer_token = os.environ.get("TWITTER_BEARER_TOKEN") or x_settings.get("bearer_token", "")
@@ -1793,7 +1793,7 @@ def x_generate_reply(user_id):
         if not post_text:
             return jsonify({"error": "post_text is required"}), 400
 
-        settings = storage.load_settings(user_id) or {}
+        settings = storage.get_settings(user_id) or {}
         memory = user_memory.get_memory(user_id)
         groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
 
@@ -1808,7 +1808,7 @@ def x_generate_reply(user_id):
 
         # Auto-save to stats
         try:
-            stats = storage.load_stats(user_id) or {}
+            stats = storage.get_stats(user_id) or {}
             x_stats = stats.get("x", {})
             x_stats["replies_generated"] = x_stats.get("replies_generated", 0) + 1
             x_stats["last_activity"] = datetime.now(timezone.utc).isoformat()
@@ -1836,7 +1836,7 @@ def x_generate_thread(user_id):
         if not topic:
             return jsonify({"error": "topic is required"}), 400
 
-        settings = storage.load_settings(user_id) or {}
+        settings = storage.get_settings(user_id) or {}
         memory = user_memory.get_memory(user_id)
         groq_key = os.environ.get("GROQ_API_KEY") or settings.get("groq_api_key", "")
 
@@ -1851,7 +1851,7 @@ def x_generate_thread(user_id):
 
         # Auto-save to stats
         try:
-            stats = storage.load_stats(user_id) or {}
+            stats = storage.get_stats(user_id) or {}
             x_stats = stats.get("x", {})
             x_stats["threads_drafted"] = x_stats.get("threads_drafted", 0) + 1
             x_stats["last_activity"] = datetime.now(timezone.utc).isoformat()
@@ -1904,7 +1904,7 @@ def x_save_to_queue(user_id):
 
         # Update stats
         try:
-            stats = storage.load_stats(user_id) or {}
+            stats = storage.get_stats(user_id) or {}
             x_stats = stats.get("x", {})
             x_stats["items_queued"] = x_stats.get("items_queued", 0) + 1
             stats["x"] = x_stats
@@ -1932,7 +1932,7 @@ def x_stats(user_id):
 def x_get_settings(user_id):
     """Get X settings for a user."""
     try:
-        settings = storage.load_settings(user_id) or {}
+        settings = storage.get_settings(user_id) or {}
         x_settings = settings.get("x", {})
         # Never expose bearer_token to frontend
         safe = {k: v for k, v in x_settings.items() if k != "bearer_token"}
@@ -1946,7 +1946,7 @@ def x_update_settings(user_id):
     """Update X settings for a user."""
     try:
         body = request.get_json(force=True) or {}
-        settings = storage.load_settings(user_id) or {}
+        settings = storage.get_settings(user_id) or {}
         x_settings = settings.get("x", {})
 
         # Allowed fields (no bearer_token from frontend)
