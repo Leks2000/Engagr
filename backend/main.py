@@ -10,6 +10,7 @@ import logging
 import threading
 import fcntl
 import uuid
+import inspect
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -416,6 +417,22 @@ def session_logs(user_id):
 
 # ── Extension AI Endpoints ────────────────────────────
 
+
+def _call_with_supported_kwargs(func, *args, **kwargs):
+    """Call a helper while passing only keyword args supported by its signature."""
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return func(*args, **kwargs)
+
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        supported = kwargs
+    else:
+        supported = {key: value for key, value in kwargs.items() if key in signature.parameters}
+
+    return func(*args, **supported)
+
+
 @api.route("/api/extension/linkedin/comment/<user_id>", methods=["POST"])
 def extension_linkedin_comment(user_id):
     """Generate AI comment variants for a LinkedIn post parsed by WebBridge."""
@@ -431,7 +448,8 @@ def extension_linkedin_comment(user_id):
         settings = storage.get_settings(user_id)
         user_language = settings.get("language", "en")
         tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
-        comment_data = ai_comment.generate_comment_variants(
+        comment_data = _call_with_supported_kwargs(
+            ai_comment.generate_comment_variants,
             post_text,
             user_language=user_language,
             platform="linkedin",
@@ -471,7 +489,8 @@ def extension_linkedin_regenerate(user_id):
 
         settings = storage.get_settings(user_id)
         tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
-        new_comment = ai_comment.regenerate_comment(
+        new_comment = _call_with_supported_kwargs(
+            ai_comment.regenerate_comment,
             post_text,
             previous_comment,
             platform="linkedin",
