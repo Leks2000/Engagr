@@ -346,7 +346,34 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.answer(f"Failed: {str(e)[:80]}")
         return
-    
+
+    # ── Sprint 1: New post card callbacks ─────────────────
+
+    if data.startswith("gen_comment_"):
+        item_id = data[len("gen_comment_"):]
+        await _handle_gen_comment(user_id, item_id, query, context)
+        return
+
+    if data.startswith("skip_post_"):
+        item_id = data[len("skip_post_"):]
+        item = storage.get_queue_item(user_id, item_id)
+        if item:
+            storage.remove_from_queue(user_id, item_id)
+        await query.edit_message_text("❌ Пост пропущен.")
+        return
+
+    if data.startswith("post_comment_"):
+        item_id = data[len("post_comment_"):]
+        await _handle_post_comment(user_id, item_id, query, context)
+        return
+
+    if data.startswith("regen_post_"):
+        item_id = data[len("regen_post_"):]
+        await _handle_regen_post_comment(user_id, item_id, query, context)
+        return
+
+    # ── End Sprint 1 callbacks ────────────────────────────
+
     # Parse action_itemId
     parts = data.split("_", 1)
     if len(parts) != 2:
@@ -505,6 +532,273 @@ async def send_queue_item_to_user(user_id: str, item: dict):
         
     except Exception as e:
         logger.error(f"Error sending queue item to user {user_id}: {e}")
+
+
+# ── Sprint 1: Handler functions for new post callbacks ──
+
+async def _handle_gen_comment(user_id: str, item_id: str, query, context):
+    """Generate AI comment variants for a newly scanned post and show them."""
+    item = storage.get_queue_item(user_id, item_id)
+    if not item:
+        await query.edit_message_text("❌ Пост не найден (уже обработан?).")
+        return
+
+    await query.edit_message_text(
+        f"⏳ Генерирую комментарий...\n\n"
+        f"📝 {item.get('post_excerpt', '')[:200]}",
+        parse_mode=None,
+    )
+
+    try:
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+        platform = item.get("platform", "linkedin")
+
+        comment_data = ai_comment.generate_comment_variants(
+            item.get("post_text") or item.get("post_excerpt") or "",
+            user_language=user_language,
+            platform=platform,
+            tone=tone,
+            user_id=user_id,
+        )
+        variants = comment_data.get("variants") or []
+        selected = variants[0] if variants else ""
+
+        if not selected:
+            await query.edit_message_text("❌ Не удалось сгенерировать комментарий. Попробуйте позже.")
+            return
+
+        # Save variants to queue item
+        storage.update_queue_item(user_id, item_id, {
+            "comment": selected,
+            "selected_comment": selected,
+            "comment_variants": variants,
+            "status": "pending",
+        })
+        item["comment"] = selected
+        item["selected_comment"] = selected
+        item["comment_variants"] = variants
+
+        # Build message with variants
+        import html as html_mod
+        platform_badge = "💼 LinkedIn" if platform == "linkedin" else "🐦 X/Twitter"
+        author = item.get("author") or "Unknown"
+        excerpt = (item.get("post_excerpt") or item.get("post_text") or "")[:200]
+        post_url = item.get("post_url") or ""
+
+        text_parts = [
+            f"<b>{platform_badge} — {html_mod.escape(author)}</b>",
+            f"<i>{html_mod.escape(excerpt)}</i>",
+            "",
+            "💬 <b>Варианты комментария:</b>",
+        ]
+        for i, v in enumerate(variants[:3], 1):
+            text_parts.append(f"\n<b>{i}.</b> <code>{html_mod.escape(v[:300])}</code>")
+
+        buttons = []
+        for i, v in enumerate(variants[:3], 1):
+            buttons.append([
+                InlineKeyboardButton(
+                    f"✅ Отправить вариант {i}",
+                    callback_data=f"post_comment_{item_id}",
+                )
+            ])
+
+        # Store which variant is selected by default (first)
+        buttons.append([
+            InlineKeyboardButton("🔄 Перегенерировать", callback_data=f"regen_post_{item_id}"),
+            InlineKeyboardButton("❌ Пропустить", callback_data=f"skip_post_{item_id}"),
+        ])
+        if post_url:
+            buttons.append([InlineKeyboardButton("🔗 Открыть пост", url=post_url)])
+
+        await query.edit_message_text(
+            "\n".join(text_parts),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+        )
+
+    except Exception as e:
+        logger.error("_handle_gen_comment user=%s item=%s err=%s", user_id, item_id, e)
+        await query.edit_message_text(f"❌ Ошибка генерации: {str(e)[:200]}")
+
+
+async def _handle_post_comment(user_id: str, item_id: str, query, context):
+    """Mark the generated comment as approved for posting by the extension."""
+    item = storage.get_queue_item(user_id, item_id)
+    if not item:
+        await query.edit_message_text("❌ Пост не найден.")
+        return
+
+    comment = item.get("selected_comment") or item.get("comment") or ""
+    post_url = item.get("post_url") or ""
+
+    # Mark as approved — extension will pick it up and post
+    storage.update_queue_item(user_id, item_id, {
+        "status": "approved",
+        "execution": "extension",
+        "approved_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    })
+
+    import html as html_mod
+    platform = item.get("platform", "linkedin")
+    platform_badge = "💼 LinkedIn" if platform == "linkedin" else "🐦 X/Twitter"
+
+    confirm_text = (
+        f"✅ <b>Комментарий одобрен!</b>\n\n"
+        f"{platform_badge} — {html_mod.escape(item.get('author') or '')}\n\n"
+        f"💬 <code>{html_mod.escape(comment[:400])}</code>\n\n"
+        f"🔔 Расширение опубликует его автоматически."
+    )
+    if post_url:
+        confirm_text += f"\n🔗 <a href=\"{post_url}\">Открыть пост</a>"
+
+    await query.edit_message_text(confirm_text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+async def _handle_regen_post_comment(user_id: str, item_id: str, query, context):
+    """Regenerate the AI comment for a post card."""
+    item = storage.get_queue_item(user_id, item_id)
+    if not item:
+        await query.edit_message_text("❌ Пост не найден.")
+        return
+
+    await query.edit_message_text("🔄 Перегенерирую комментарий...")
+
+    try:
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        tone = (settings.get("linkedin") or {}).get("tone", "friendly")
+        platform = item.get("platform", "linkedin")
+
+        new_comment = ai_comment.regenerate_comment(
+            item.get("post_text") or item.get("post_excerpt") or "",
+            item.get("comment") or "",
+            platform=platform,
+            tone=tone,
+            user_id=user_id,
+        )
+
+        storage.update_queue_item(user_id, item_id, {
+            "comment": new_comment,
+            "selected_comment": new_comment,
+            "comment_variants": [new_comment],
+        })
+
+        import html as html_mod
+        post_url = item.get("post_url") or ""
+        platform_badge = "💼 LinkedIn" if platform == "linkedin" else "🐦 X/Twitter"
+        author = item.get("author") or "Unknown"
+        excerpt = (item.get("post_excerpt") or item.get("post_text") or "")[:200]
+
+        text = (
+            f"<b>{platform_badge} — {html_mod.escape(author)}</b>\n"
+            f"<i>{html_mod.escape(excerpt)}</i>\n\n"
+            f"🔄 <b>Новый вариант:</b>\n"
+            f"<code>{html_mod.escape(new_comment[:400])}</code>"
+        )
+
+        buttons = [
+            [InlineKeyboardButton("✅ Отправить", callback_data=f"post_comment_{item_id}")],
+            [
+                InlineKeyboardButton("🔄 Ещё раз", callback_data=f"regen_post_{item_id}"),
+                InlineKeyboardButton("❌ Пропустить", callback_data=f"skip_post_{item_id}"),
+            ],
+        ]
+        if post_url:
+            buttons.append([InlineKeyboardButton("🔗 Открыть пост", url=post_url)])
+
+        await query.edit_message_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+        )
+
+    except Exception as e:
+        logger.error("_handle_regen_post_comment user=%s item=%s err=%s", user_id, item_id, e)
+        await query.edit_message_text(f"❌ Ошибка: {str(e)[:200]}")
+
+
+# ── Sprint 1: New Post Cards from Auto-Scan ──────────
+
+def _new_post_card_text(item: dict) -> str:
+    """Format a newly scanned post as a Telegram message card."""
+    platform = item.get("platform", "linkedin")
+    if platform == "x":
+        badge = "🐦 X / TWITTER"
+    elif platform == "linkedin":
+        badge = "💼 LINKEDIN"
+    else:
+        badge = platform.upper()
+
+    author = item.get("author") or item.get("author_name") or "Unknown"
+    excerpt = (item.get("post_text") or item.get("post_excerpt") or "")[:300]
+    post_url = item.get("post_url") or ""
+
+    text = (
+        f"📡 *Новый пост — {badge}*\n\n"
+        f"👤 *{author}*\n\n"
+        f"📝 {excerpt}\n"
+    )
+    if post_url:
+        text += f"\n🔗 [Открыть пост]({post_url})"
+    return text
+
+
+def _new_post_card_keyboard(item: dict) -> InlineKeyboardMarkup:
+    """Inline keyboard for a newly scanned post card."""
+    item_id = item.get("id", "")
+    post_url = item.get("post_url") or ""
+
+    buttons = [
+        [InlineKeyboardButton("💬 Сгенерировать комментарий", callback_data=f"gen_comment_{item_id}")],
+        [InlineKeyboardButton("❌ Пропустить", callback_data=f"skip_post_{item_id}")],
+    ]
+    if post_url:
+        buttons[0].append(InlineKeyboardButton("🔗 Открыть", url=post_url))
+
+    return InlineKeyboardMarkup(buttons)
+
+
+async def send_new_post_cards(user_id: str, items: list):
+    """
+    Send newly auto-scanned post cards to the user in Telegram.
+    Each card has [Сгенерировать комментарий] and [Пропустить] buttons.
+    Called from main.py after extension pushes new posts.
+    """
+    app = _bot_app
+    if not app:
+        logger.error("send_new_post_cards: bot not initialized")
+        return
+
+    sent = 0
+    for item in items[:5]:  # max 5 per scan to avoid spam
+        try:
+            await app.bot.send_message(
+                chat_id=int(user_id),
+                text=_new_post_card_text(item),
+                reply_markup=_new_post_card_keyboard(item),
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+            )
+            sent += 1
+            # Small delay to avoid Telegram rate limits
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error("send_new_post_cards item=%s user=%s err=%s", item.get("id"), user_id, e)
+
+    if sent > 0:
+        try:
+            await app.bot.send_message(
+                chat_id=int(user_id),
+                text=f"📡 *Авто-скан завершён* — найдено {len(items)} новых постов, показано {sent}.",
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
 
 
 # ── Bot Setup ─────────────────────────────────────────

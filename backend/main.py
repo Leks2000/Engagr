@@ -660,6 +660,139 @@ def extension_linkedin_action_dismiss(user_id, item_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Extension Posts Push (Sprint 1 Auto-Scan) ─────────
+
+@api.route("/api/extension/posts/push", methods=["POST"])
+def extension_posts_push():
+    """
+    Receive posts scanned by the Chrome Extension (auto-scan every 15 min).
+    Filter out already-seen posts, then push new ones to Telegram as
+    inline-button cards so the user can generate & send a comment.
+
+    Body:
+      {
+        "posts": [{"author": "...", "post": "...", "url": "...", "platform": "linkedin"|"x"}],
+        "user_id": "...",       # optional if Bearer token present
+        "scanned_at": "..."
+      }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+
+        # Resolve user_id from token or body
+        user_id = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = auth_module.verify_token(token)
+            if payload:
+                user_id = payload.get("sub")
+
+        if not user_id:
+            user_id = str(body.get("user_id") or body.get("userId") or "").strip()
+
+        if not user_id:
+            return jsonify({"error": "user_id required (via Bearer token or body)"}), 400
+
+        raw_posts = body.get("posts")
+        if not isinstance(raw_posts, list) or not raw_posts:
+            return jsonify({"error": "posts array required", "pushed": 0}), 400
+
+        # Load existing queue to deduplicate
+        queue = storage.get_queue(user_id)
+        existing_keys = {
+            q.get("post_url") or q.get("post_id") or q.get("post_text", "")[:120]
+            for q in queue
+        }
+
+        pushed = 0
+        skipped = 0
+        new_items = []
+
+        for raw in raw_posts:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
+
+            post_text = (raw.get("post") or raw.get("post_text") or "").strip()
+            post_url = (raw.get("url") or raw.get("post_url") or "").strip()
+            author = (raw.get("author") or "Unknown").strip()
+            platform = (raw.get("platform") or "linkedin").lower()
+
+            if not post_text or len(post_text) < 10:
+                skipped += 1
+                continue
+
+            # Deduplicate by URL or first 120 chars of text
+            dedup_key = post_url or post_text[:120]
+            if dedup_key in existing_keys:
+                skipped += 1
+                continue
+            existing_keys.add(dedup_key)
+
+            item = {
+                "id": str(uuid.uuid4()),
+                "platform": platform,
+                "action": "comment",
+                "source": "extension_autoscan",
+                "post_id": post_url or post_text[:80],
+                "post_url": post_url,
+                "post_excerpt": post_text[:200],
+                "post_text": post_text,
+                "author": author,
+                "author_name": author,
+                "comment": "",          # empty until user generates
+                "selected_comment": "",
+                "comment_variants": [],
+                "status": "new_post",   # special status — waiting for user to generate comment
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "scanned_at": body.get("scanned_at", ""),
+            }
+            storage.add_to_queue(user_id, item)
+            new_items.append(item)
+            pushed += 1
+
+        # Push new posts to Telegram as inline-button cards
+        if new_items:
+            _push_posts_to_telegram(user_id, new_items)
+
+        logger.info(
+            "extension/posts/push user=%s pushed=%d skipped=%d",
+            user_id, pushed, skipped,
+        )
+        return jsonify({
+            "ok": True,
+            "pushed": pushed,
+            "skipped": skipped,
+            "user_id": user_id,
+        })
+
+    except Exception as e:
+        logger.error("extension/posts/push error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+def _push_posts_to_telegram(user_id: str, items: list):
+    """
+    Send newly scanned post cards to the user's Telegram chat.
+    Runs in a fire-and-forget background thread.
+    """
+    import threading
+
+    def _send():
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(telegram_bot.send_new_post_cards(user_id, items))
+            loop.close()
+        except Exception as e:
+            logger.error("_push_posts_to_telegram error user=%s: %s", user_id, e)
+
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+
+
 # ── Queue Endpoints ───────────────────────────────────
 
 @api.route("/api/queue/<user_id>", methods=["GET"])

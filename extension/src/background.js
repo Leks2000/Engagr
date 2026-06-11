@@ -9,6 +9,7 @@
  *  - Tab management for LinkedIn & X actions
  *  - Mini App context synchronization
  *  - Connection status tracking
+ *  - AUTO FEED SCAN via chrome.alarms every 15 minutes (Sprint 1)
  */
 
 const DEFAULT_SETTINGS = {
@@ -28,6 +29,9 @@ const DEFAULT_SETTINGS = {
   pollInterval: 30, // seconds
   lastPollAt: null,
   pendingTaskCount: 0,
+  // Auto-scan
+  autoScanIntervalMinutes: 15,
+  lastAutoScanAt: null,
 }
 
 // ─── Initialization ───────────────────────────────────────
@@ -44,18 +48,25 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   await chrome.storage.sync.set(next)
 
-  // Set up polling alarm
+  // Set up task polling alarm (every 30s)
   chrome.alarms.create('engagr-poll-tasks', { periodInMinutes: 0.5 })
+
+  // Set up feed auto-scan alarm (every 15 min)
+  chrome.alarms.create('engagr-feed-scan', { periodInMinutes: 15 })
 
   // Set initial badge
   updateBadge(0)
+  console.log('[Engagr] Extension installed. Auto-scan alarm set for every 15 minutes.')
 })
 
-// ─── Alarm-based Task Polling ─────────────────────────────
+// ─── Alarm-based Task Polling & Feed Auto-Scan ────────────
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'engagr-poll-tasks') {
     await pollTasks()
+  }
+  if (alarm.name === 'engagr-feed-scan') {
+    await autoScanFeed()
   }
 })
 
@@ -115,6 +126,140 @@ async function pollTasks() {
   }
 }
 
+// ─── Auto Feed Scan ───────────────────────────────────────
+
+/**
+ * Auto-scan LinkedIn/X feed and push new posts to backend → Telegram.
+ * Called by chrome.alarms every 15 minutes.
+ */
+async function autoScanFeed() {
+  try {
+    const settings = await chrome.storage.sync.get([
+      'apiBaseUrl', 'telegramUserId', 'jwtToken', 'autoScanLinkedIn', 'lastAutoScanAt',
+    ])
+    const { apiBaseUrl, telegramUserId, jwtToken, autoScanLinkedIn } = settings
+
+    // Need auth to push posts
+    if (!jwtToken && !telegramUserId) {
+      console.debug('[Engagr] Auto-scan skipped: not authenticated')
+      return
+    }
+
+    if (autoScanLinkedIn === false) {
+      console.debug('[Engagr] Auto-scan disabled by user settings')
+      return
+    }
+
+    console.log('[Engagr] Auto-scan started at', new Date().toISOString())
+
+    // Find open LinkedIn tab(s)
+    const linkedinTabs = await chrome.tabs.query({
+      url: ['https://www.linkedin.com/feed/*', 'https://www.linkedin.com/'],
+    })
+
+    // Also check for LinkedIn tabs not just on /feed/
+    const allLinkedinTabs = linkedinTabs.length > 0
+      ? linkedinTabs
+      : await chrome.tabs.query({ url: 'https://www.linkedin.com/*' })
+
+    let scannedPosts = []
+
+    if (allLinkedinTabs.length > 0) {
+      // Ask the content script to parse the feed
+      for (const tab of allLinkedinTabs.slice(0, 1)) {
+        try {
+          const result = await chrome.tabs.sendMessage(tab.id, {
+            type: 'ENGAGR_PARSE_LINKEDIN_FEED',
+          })
+          if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
+            scannedPosts = result.posts.map((p) => ({ ...p, platform: 'linkedin' }))
+            console.log(`[Engagr] Auto-scan got ${scannedPosts.length} LinkedIn posts`)
+            break
+          }
+        } catch (err) {
+          console.debug('[Engagr] Could not reach LinkedIn tab:', err.message)
+        }
+      }
+    }
+
+    // Find open X/Twitter tab(s)
+    const xTabs = await chrome.tabs.query({
+      url: ['https://x.com/*', 'https://twitter.com/*'],
+    })
+
+    if (xTabs.length > 0) {
+      for (const tab of xTabs.slice(0, 1)) {
+        try {
+          const result = await chrome.tabs.sendMessage(tab.id, {
+            type: 'ENGAGR_PARSE_X_FEED',
+          })
+          if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
+            scannedPosts = [
+              ...scannedPosts,
+              ...result.posts.map((p) => ({ ...p, platform: 'x' })),
+            ]
+            console.log(`[Engagr] Auto-scan got ${result.posts.length} X posts`)
+            break
+          }
+        } catch (err) {
+          console.debug('[Engagr] Could not reach X tab:', err.message)
+        }
+      }
+    }
+
+    if (scannedPosts.length === 0) {
+      console.debug('[Engagr] Auto-scan: no posts found (no open feed tabs?)')
+      await chrome.storage.sync.set({ lastAutoScanAt: new Date().toISOString() })
+      return
+    }
+
+    // Push posts to backend
+    await pushPostsToBackend(scannedPosts, settings)
+
+    await chrome.storage.sync.set({ lastAutoScanAt: new Date().toISOString() })
+  } catch (err) {
+    console.error('[Engagr] Auto-scan error:', err.message)
+  }
+}
+
+/**
+ * Send scanned posts to backend POST /api/extension/posts/push
+ * Backend will filter new posts and push them to Telegram.
+ */
+async function pushPostsToBackend(posts, settings) {
+  try {
+    const { apiBaseUrl, telegramUserId, jwtToken } = settings
+    const baseUrl = (apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl).replace(/\/$/, '')
+    const headers = { 'Content-Type': 'application/json' }
+
+    if (jwtToken) {
+      headers['Authorization'] = `Bearer ${jwtToken}`
+    }
+
+    const body = {
+      posts,
+      user_id: telegramUserId || null,
+      scanned_at: new Date().toISOString(),
+    }
+
+    const response = await fetch(`${baseUrl}/api/extension/posts/push`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      console.log(`[Engagr] Pushed ${posts.length} posts → backend sent ${data.pushed || 0} new to Telegram`)
+    } else {
+      console.warn('[Engagr] Push posts failed:', response.status)
+    }
+  } catch (err) {
+    console.error('[Engagr] pushPostsToBackend error:', err.message)
+  }
+}
+
 /**
  * Update the extension badge with pending task count.
  */
@@ -170,6 +315,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Manual poll trigger
   if (message.type === 'ENGAGR_POLL_TASKS') {
     pollTasks().then(() => sendResponse({ ok: true }))
+    return true
+  }
+
+  // Manual feed scan trigger
+  if (message.type === 'ENGAGR_SCAN_FEED') {
+    autoScanFeed().then(() => sendResponse({ ok: true }))
     return true
   }
 
@@ -381,10 +532,17 @@ async function getConnectionStatus() {
 
 // ─── Startup ─────────────────────────────────────────────
 
-// Ensure alarm exists on startup
+// Ensure alarms exist on startup (service workers can restart)
 chrome.alarms.get('engagr-poll-tasks', (alarm) => {
   if (!alarm) {
     chrome.alarms.create('engagr-poll-tasks', { periodInMinutes: 0.5 })
+  }
+})
+
+chrome.alarms.get('engagr-feed-scan', (alarm) => {
+  if (!alarm) {
+    chrome.alarms.create('engagr-feed-scan', { periodInMinutes: 15 })
+    console.log('[Engagr] Feed auto-scan alarm registered (15 min interval)')
   }
 })
 
