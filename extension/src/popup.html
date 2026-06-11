@@ -74,7 +74,8 @@
         📋 Tasks <span class="task-badge" id="taskBadge" hidden>0</span>
       </button>
       <button type="button" class="platform-tab" data-platform="linkedin">🔗 LinkedIn</button>
-      <button type="button" class="platform-tab" data-platform="x">𝕏 Twitter</button>
+      <button type="button" class="platform-tab" data-platform="x">𝕏 X</button>
+      <button type="button" class="platform-tab" data-platform="reddit">🤖 Reddit</button>
     </div>
 
     <!-- Tasks Panel -->
@@ -115,9 +116,22 @@
       <div id="parsedTweets" class="post-list" hidden></div>
     </section>
 
+    <!-- Reddit Panel -->
+    <section class="section platform-panel" id="redditPanel" hidden>
+      <div class="section-header">
+        <h3>Reddit Feed</h3>
+        <button type="button" class="btn btn-sm btn-secondary" id="scanRedditButton">🔍 Scan Feed</button>
+      </div>
+      <p class="reddit-status" id="redditStatus">Open Reddit (reddit.com) and scan for posts.</p>
+      <div class="parser-count">
+        <span id="redditCount">0</span> posts found
+      </div>
+      <div id="parsedRedditPosts" class="post-list" hidden></div>
+    </section>
+
     <!-- Footer -->
     <footer class="popup-footer">
-      <span>Engagr WebBridge v0.5.0</span>
+      <span>Engagr WebBridge v0.6.0</span>
       <span class="footer-sep">·</span>
       <span id="lastPollTime">—</span>
     </footer>

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Engagr WebBridge",
-  "description": "Personal Chrome bridge for Engagr Mini App workflows — LinkedIn & X/Twitter.",
-  "version": "0.5.0",
+  "description": "Personal Chrome bridge for Engagr Mini App — LinkedIn, X/Twitter & Reddit.",
+  "version": "0.6.0",
   "action": {
     "default_title": "Engagr WebBridge",
     "default_popup": "src/popup.html"
@@ -11,7 +11,8 @@
     "storage",
     "tabs",
     "alarms",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*",
@@ -19,6 +20,9 @@
     "https://x.com/*",
     "https://twitter.com/*",
     "https://www.twitter.com/*",
+    "https://www.reddit.com/*",
+    "https://reddit.com/*",
+    "https://old.reddit.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*",
     "https://*.vercel.app/*",
@@ -51,6 +55,17 @@
       "js": [
         "src/x_parser.js",
         "src/x_actions.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.reddit.com/*",
+        "https://reddit.com/*",
+        "https://old.reddit.com/*"
+      ],
+      "js": [
+        "src/reddit_parser.js"
       ],
       "run_at": "document_idle"
     },

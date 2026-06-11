@@ -61,6 +61,12 @@ const elements = {
   xStatus: $('#xStatus'),
   xCount: $('#xCount'),
   parsedTweets: $('#parsedTweets'),
+  // Reddit panel
+  redditPanel: $('#redditPanel'),
+  scanRedditButton: $('#scanRedditButton'),
+  redditStatus: $('#redditStatus'),
+  redditCount: $('#redditCount'),
+  parsedRedditPosts: $('#parsedRedditPosts'),
   // Footer
   lastPollTime: $('#lastPollTime'),
 }
@@ -71,6 +77,7 @@ let activePanel = 'tasks'
 let pendingTasks = []
 let parsedLinkedInPosts = []
 let parsedXTweets = []
+let parsedRedditPosts = []
 
 // ─── Utilities ────────────────────────────────────────────
 
@@ -145,6 +152,7 @@ function switchPanel(panel) {
   elements.tasksPanel.hidden = panel !== 'tasks'
   elements.linkedinPanel.hidden = panel !== 'linkedin'
   elements.xPanel.hidden = panel !== 'x'
+  elements.redditPanel.hidden = panel !== 'reddit'
 }
 
 // ─── Connection Status ────────────────────────────────────
@@ -402,11 +410,17 @@ async function scanLinkedInFeed() {
     parsedLinkedInPosts = Array.isArray(response?.posts) ? response.posts : []
 
     renderLinkedInPosts()
-    elements.parserStatus.textContent = parsedLinkedInPosts.length
-      ? `Found ${parsedLinkedInPosts.length} post${parsedLinkedInPosts.length === 1 ? '' : 's'} in feed.`
-      : 'No posts found. Scroll the feed and scan again.'
-  } catch {
-    elements.parserStatus.textContent = 'Parser not ready. Reload LinkedIn tab and try again.'
+
+    if (parsedLinkedInPosts.length > 0) {
+      elements.parserStatus.textContent = `Found ${parsedLinkedInPosts.length} post(s). Pushing to Telegram...`
+      // Push to backend so Telegram gets the cards
+      await chrome.runtime.sendMessage({ type: 'ENGAGR_SCAN_FEED' })
+      elements.parserStatus.textContent = `${parsedLinkedInPosts.length} post(s) found & sent to Telegram.`
+    } else {
+      elements.parserStatus.textContent = 'No posts found. Scroll the LinkedIn feed and try again.'
+    }
+  } catch (err) {
+    elements.parserStatus.textContent = `Error: ${err.message || 'Parser not ready. Reload LinkedIn tab.'}`
   } finally {
     elements.scanLinkedInButton.disabled = false
   }
@@ -445,14 +459,73 @@ async function scanXFeed() {
     parsedXTweets = Array.isArray(response?.posts) ? response.posts : []
 
     renderXTweets()
-    elements.xStatus.textContent = parsedXTweets.length
-      ? `Found ${parsedXTweets.length} tweet${parsedXTweets.length === 1 ? '' : 's'} in feed.`
-      : 'No tweets found. Scroll the feed and scan again.'
-  } catch {
-    elements.xStatus.textContent = 'Parser not ready. Reload X tab and try again.'
+
+    if (parsedXTweets.length > 0) {
+      elements.xStatus.textContent = `Found ${parsedXTweets.length} tweet(s). Pushing to Telegram...`
+      await chrome.runtime.sendMessage({ type: 'ENGAGR_SCAN_FEED' })
+      elements.xStatus.textContent = `${parsedXTweets.length} tweet(s) found & sent to Telegram.`
+    } else {
+      elements.xStatus.textContent = 'No tweets found. Scroll the X feed and try again.'
+    }
+  } catch (err) {
+    elements.xStatus.textContent = `Error: ${err.message || 'Parser not ready. Reload X tab.'}`
   } finally {
     elements.scanXButton.disabled = false
   }
+}
+
+// ─── Reddit Scanning ──────────────────────────────────────
+
+function isRedditUrl(url) {
+  return /^https?:\/\/(www\.|old\.)?reddit\.com\//i.test(url || '')
+}
+
+async function scanRedditFeed() {
+  elements.scanRedditButton.disabled = true
+  elements.redditStatus.textContent = 'Scanning Reddit feed...'
+
+  try {
+    const tab = await getActiveTab()
+    if (!tab?.id || !isRedditUrl(tab.url)) {
+      elements.redditStatus.textContent = 'Open Reddit (reddit.com) first, then scan.'
+      return
+    }
+
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'ENGAGR_PARSE_REDDIT_FEED' })
+    parsedRedditPosts = Array.isArray(response?.posts) ? response.posts : []
+
+    renderRedditPosts()
+
+    if (parsedRedditPosts.length > 0) {
+      elements.redditStatus.textContent = `Found ${parsedRedditPosts.length} post(s). Pushing to Telegram...`
+      await chrome.runtime.sendMessage({ type: 'ENGAGR_SCAN_FEED' })
+      elements.redditStatus.textContent = `${parsedRedditPosts.length} post(s) found & sent to Telegram.`
+    } else {
+      elements.redditStatus.textContent = 'No posts found. Scroll the Reddit feed and try again.'
+    }
+  } catch (err) {
+    elements.redditStatus.textContent = `Error: ${err.message || 'Parser not ready. Reload Reddit tab.'}`
+  } finally {
+    elements.scanRedditButton.disabled = false
+  }
+}
+
+function renderRedditPosts() {
+  elements.redditCount.textContent = String(parsedRedditPosts.length)
+  elements.parsedRedditPosts.hidden = parsedRedditPosts.length === 0
+
+  elements.parsedRedditPosts.innerHTML = parsedRedditPosts.slice(0, 5).map((item, idx) => `
+    <article class="parsed-post-card">
+      <strong>${escapeHtml(item.author || 'Unknown')}</strong>
+      ${item.subreddit ? `<span style="font-size:10px;color:#ff4500"> r/${escapeHtml(item.subreddit)}</span>` : ''}
+      <p>${escapeHtml(item.title || item.post || '')}</p>
+      ${item.score !== undefined ? `<div style="font-size:10px;color:#6b7280;">⬆️${item.score} 💬${item.comments || 0}</div>` : ''}
+      <div class="post-actions">
+        ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">Open</a>` : ''}
+        <button type="button" class="mini-action" data-generate-reddit="${idx}">Generate AI</button>
+      </div>
+    </article>
+  `).join('')
 }
 
 function renderXTweets() {
@@ -496,6 +569,8 @@ async function detectActiveTab() {
     elements.activeTabLabel.textContent = 'LinkedIn tab detected'
   } else if (isXUrl(tab?.url)) {
     elements.activeTabLabel.textContent = 'X/Twitter tab detected'
+  } else if (isRedditUrl(tab?.url)) {
+    elements.activeTabLabel.textContent = 'Reddit tab detected'
   } else {
     elements.activeTabLabel.textContent = 'Ready for workflows'
   }
@@ -578,7 +653,44 @@ async function generateXReply(index) {
   }
 }
 
-// ─── Event Listeners ──────────────────────────────────────
+async function generateRedditComment(index) {
+  const settings = await loadSettings()
+  const userId = settings.telegramUserId
+  if (!userId) {
+    elements.redditStatus.textContent = 'Connect to Engagr first.'
+    return
+  }
+
+  const item = parsedRedditPosts[index]
+  if (!item) return
+
+  elements.redditStatus.textContent = 'Generating AI comment...'
+
+  try {
+    // Use the LinkedIn comment endpoint (works for any platform)
+    const data = await fetchJson(apiUrl(`/api/extension/linkedin/comment/${encodeURIComponent(userId)}`, settings), {
+      method: 'POST',
+      body: JSON.stringify({
+        author: item.author,
+        post: item.post || item.title,
+        url: item.url,
+        platform: 'reddit',
+      }),
+    })
+
+    parsedRedditPosts[index] = {
+      ...item,
+      aiComment: {
+        variants: data.variants || [data.comment],
+        selected_comment: data.selected_comment || data.comment || '',
+      },
+    }
+    renderRedditPosts()
+    elements.redditStatus.textContent = 'AI comment generated.'
+  } catch (err) {
+    elements.redditStatus.textContent = err.message || 'Generation failed.'
+  }
+}
 
 // Platform tabs
 elements.platformTabs.addEventListener('click', (e) => {
@@ -610,6 +722,9 @@ elements.scanLinkedInButton.addEventListener('click', scanLinkedInFeed)
 // X scan
 elements.scanXButton.addEventListener('click', scanXFeed)
 
+// Reddit scan
+elements.scanRedditButton.addEventListener('click', scanRedditFeed)
+
 // Task actions (event delegation)
 elements.approvedActions.addEventListener('click', (e) => {
   const execBtn = e.target.closest('[data-execute-task]')
@@ -634,6 +749,12 @@ elements.parsedTweets.addEventListener('click', (e) => {
   if (btn) generateXReply(Number(btn.dataset.generateX))
 })
 
+// Reddit AI generation (event delegation)
+elements.parsedRedditPosts.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-generate-reddit]')
+  if (btn) generateRedditComment(Number(btn.dataset.generateReddit))
+})
+
 // ─── Initialization ───────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -647,5 +768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     switchPanel('linkedin')
   } else if (isXUrl(tab?.url)) {
     switchPanel('x')
+  } else if (isRedditUrl(tab?.url)) {
+    switchPanel('reddit')
   }
 })

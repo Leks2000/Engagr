@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS = {
   aiProvider: 'groq',
   autoOpenLinkedIn: true,
   autoScanLinkedIn: true,
+  autoScanReddit: true,
   lastConnectionCheck: null,
   lastMiniAppSync: null,
   linkedinKeywords: [],
@@ -129,15 +130,45 @@ async function pollTasks() {
 // ─── Auto Feed Scan ───────────────────────────────────────
 
 /**
- * Auto-scan LinkedIn/X feed and push new posts to backend → Telegram.
- * Called by chrome.alarms every 15 minutes.
+ * Send a message to a tab content script.
+ * Falls back to scripting.executeScript injection if the content script
+ * hasn't been injected yet (e.g. tab was already open before extension installed).
+ */
+async function sendMessageToTab(tabId, message, scriptFiles) {
+  try {
+    const result = await chrome.tabs.sendMessage(tabId, message)
+    return result
+  } catch (err) {
+    // Content script not yet injected — try dynamic injection
+    if (chrome.scripting && scriptFiles && scriptFiles.length > 0) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: scriptFiles,
+        })
+        // Small wait for script to initialise
+        await new Promise((r) => setTimeout(r, 600))
+        const result2 = await chrome.tabs.sendMessage(tabId, message)
+        return result2
+      } catch (err2) {
+        console.debug('[Engagr] Dynamic inject failed:', err2.message)
+      }
+    }
+    return null
+  }
+}
+
+/**
+ * Auto-scan LinkedIn / X / Reddit feeds and push new posts to backend → Telegram.
+ * Called by chrome.alarms every 15 minutes AND via manual ENGAGR_SCAN_FEED message.
  */
 async function autoScanFeed() {
   try {
     const settings = await chrome.storage.sync.get([
-      'apiBaseUrl', 'telegramUserId', 'jwtToken', 'autoScanLinkedIn', 'lastAutoScanAt',
+      'apiBaseUrl', 'telegramUserId', 'jwtToken',
+      'autoScanLinkedIn', 'autoScanReddit', 'lastAutoScanAt',
     ])
-    const { apiBaseUrl, telegramUserId, jwtToken, autoScanLinkedIn } = settings
+    const { telegramUserId, jwtToken, autoScanLinkedIn, autoScanReddit } = settings
 
     // Need auth to push posts
     if (!jwtToken && !telegramUserId) {
@@ -145,73 +176,97 @@ async function autoScanFeed() {
       return
     }
 
-    if (autoScanLinkedIn === false) {
-      console.debug('[Engagr] Auto-scan disabled by user settings')
-      return
-    }
-
     console.log('[Engagr] Auto-scan started at', new Date().toISOString())
-
-    // Find open LinkedIn tab(s)
-    const linkedinTabs = await chrome.tabs.query({
-      url: ['https://www.linkedin.com/feed/*', 'https://www.linkedin.com/'],
-    })
-
-    // Also check for LinkedIn tabs not just on /feed/
-    const allLinkedinTabs = linkedinTabs.length > 0
-      ? linkedinTabs
-      : await chrome.tabs.query({ url: 'https://www.linkedin.com/*' })
 
     let scannedPosts = []
 
-    if (allLinkedinTabs.length > 0) {
-      // Ask the content script to parse the feed
-      for (const tab of allLinkedinTabs.slice(0, 1)) {
-        try {
-          const result = await chrome.tabs.sendMessage(tab.id, {
-            type: 'ENGAGR_PARSE_LINKEDIN_FEED',
-          })
-          if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
-            scannedPosts = result.posts.map((p) => ({ ...p, platform: 'linkedin' }))
-            console.log(`[Engagr] Auto-scan got ${scannedPosts.length} LinkedIn posts`)
-            break
-          }
-        } catch (err) {
-          console.debug('[Engagr] Could not reach LinkedIn tab:', err.message)
+    // ── LinkedIn ────────────────────────────────────────────
+    if (autoScanLinkedIn !== false) {
+      const linkedinTabs = await chrome.tabs.query({
+        url: ['https://www.linkedin.com/*', 'https://linkedin.com/*'],
+      })
+
+      for (const tab of linkedinTabs.slice(0, 1)) {
+        const result = await sendMessageToTab(
+          tab.id,
+          { type: 'ENGAGR_PARSE_LINKEDIN_FEED' },
+          ['src/linkedin_parser.js', 'src/linkedin_actions.js'],
+        )
+        if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
+          const posts = result.posts.map((p) => ({ ...p, platform: 'linkedin' }))
+          scannedPosts = scannedPosts.concat(posts)
+          console.log(`[Engagr] LinkedIn: found ${posts.length} posts`)
+        } else {
+          console.debug('[Engagr] LinkedIn: no posts (tab:', tab.url, 'result:', result?.count, ')')
         }
+      }
+
+      if (linkedinTabs.length === 0) {
+        console.debug('[Engagr] LinkedIn: no open tabs')
       }
     }
 
-    // Find open X/Twitter tab(s)
+    // ── X / Twitter ─────────────────────────────────────────
     const xTabs = await chrome.tabs.query({
-      url: ['https://x.com/*', 'https://twitter.com/*'],
+      url: ['https://x.com/*', 'https://twitter.com/*', 'https://www.twitter.com/*'],
     })
 
-    if (xTabs.length > 0) {
-      for (const tab of xTabs.slice(0, 1)) {
-        try {
-          const result = await chrome.tabs.sendMessage(tab.id, {
-            type: 'ENGAGR_PARSE_X_FEED',
-          })
-          if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
-            scannedPosts = [
-              ...scannedPosts,
-              ...result.posts.map((p) => ({ ...p, platform: 'x' })),
-            ]
-            console.log(`[Engagr] Auto-scan got ${result.posts.length} X posts`)
-            break
-          }
-        } catch (err) {
-          console.debug('[Engagr] Could not reach X tab:', err.message)
+    for (const tab of xTabs.slice(0, 1)) {
+      const result = await sendMessageToTab(
+        tab.id,
+        { type: 'ENGAGR_PARSE_X_FEED' },
+        ['src/x_parser.js', 'src/x_actions.js'],
+      )
+      if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
+        const posts = result.posts.map((p) => ({ ...p, platform: 'x' }))
+        scannedPosts = scannedPosts.concat(posts)
+        console.log(`[Engagr] X: found ${posts.length} posts`)
+      } else {
+        console.debug('[Engagr] X: no posts (tab:', tab.url, 'result:', result?.count, ')')
+      }
+    }
+
+    if (xTabs.length === 0) {
+      console.debug('[Engagr] X: no open tabs')
+    }
+
+    // ── Reddit ───────────────────────────────────────────────
+    if (autoScanReddit !== false) {
+      const redditTabs = await chrome.tabs.query({
+        url: [
+          'https://www.reddit.com/*',
+          'https://reddit.com/*',
+          'https://old.reddit.com/*',
+        ],
+      })
+
+      for (const tab of redditTabs.slice(0, 1)) {
+        const result = await sendMessageToTab(
+          tab.id,
+          { type: 'ENGAGR_PARSE_REDDIT_FEED' },
+          ['src/reddit_parser.js'],
+        )
+        if (result?.ok && Array.isArray(result.posts) && result.posts.length > 0) {
+          const posts = result.posts.map((p) => ({ ...p, platform: 'reddit' }))
+          scannedPosts = scannedPosts.concat(posts)
+          console.log(`[Engagr] Reddit: found ${posts.length} posts`)
+        } else {
+          console.debug('[Engagr] Reddit: no posts (tab:', tab.url, 'result:', result?.count, ')')
         }
+      }
+
+      if (redditTabs.length === 0) {
+        console.debug('[Engagr] Reddit: no open tabs')
       }
     }
 
     if (scannedPosts.length === 0) {
-      console.debug('[Engagr] Auto-scan: no posts found (no open feed tabs?)')
+      console.debug('[Engagr] Auto-scan: 0 posts total. Open LinkedIn/X/Reddit feed tabs.')
       await chrome.storage.sync.set({ lastAutoScanAt: new Date().toISOString() })
       return
     }
+
+    console.log(`[Engagr] Auto-scan complete — pushing ${scannedPosts.length} posts to backend`)
 
     // Push posts to backend
     await pushPostsToBackend(scannedPosts, settings)
@@ -318,9 +373,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
-  // Manual feed scan trigger
+  // Manual feed scan trigger (LinkedIn + X + Reddit)
   if (message.type === 'ENGAGR_SCAN_FEED') {
-    autoScanFeed().then(() => sendResponse({ ok: true }))
+    autoScanFeed().then((result) => sendResponse({ ok: true }))
     return true
   }
 
