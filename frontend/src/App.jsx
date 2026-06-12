@@ -219,6 +219,12 @@ function App() {
       window.history.replaceState({}, '', '/')
       loadSettings().then(() => setScreen('linkedin'))
     }
+    // Deep link: ?screen=queue opens Queue tab directly
+    const screenParam = params.get('screen')
+    if (screenParam && ['dashboard', 'queue', 'linkedin', 'reddit', 'more', 'memory', 'ideas', 'x'].includes(screenParam)) {
+      window.history.replaceState({}, '', '/')
+      setScreen(screenParam)
+    }
   }, [])
 
   if (!webAppReady || screen === 'loading') return (

@@ -792,13 +792,70 @@ async def send_new_post_cards(user_id: str, items: list):
 
     if sent > 0:
         try:
-            await app.bot.send_message(
-                chat_id=int(user_id),
-                text=f"📡 *Авто-скан завершён* — найдено {len(items)} новых постов, показано {sent}.",
-                parse_mode="Markdown",
-            )
+            from config import MINI_APP_URL
+            if MINI_APP_URL:
+                queue_url = f"{MINI_APP_URL.rstrip('/')}" if '?' not in MINI_APP_URL else f"{MINI_APP_URL.rstrip('/')}&screen=queue"
+                if '?' not in queue_url:
+                    queue_url = f"{MINI_APP_URL.rstrip('/')}/?screen=queue"
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 Open Queue", web_app=WebAppInfo(url=queue_url))]
+                ])
+                await app.bot.send_message(
+                    chat_id=int(user_id),
+                    text=f"📡 *Авто-скан завершён* — найдено {len(items)} новых постов, показано {sent}.\n\nОткройте очередь чтобы проверить и одобрить комментарии.",
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+            else:
+                await app.bot.send_message(
+                    chat_id=int(user_id),
+                    text=f"📡 *Авто-скан завершён* — найдено {len(items)} новых постов, показано {sent}.",
+                    parse_mode="Markdown",
+                )
         except Exception:
             pass
+
+
+async def send_execution_status(user_id: str, item: dict, status: str, error_msg: str = ""):
+    """
+    Notify user about comment execution result (published/failed).
+    Called from extension after it posts a comment.
+    """
+    import html as html_mod
+
+    app = _bot_app
+    if not app:
+        return
+
+    platform = item.get("platform", "linkedin")
+    platform_badge = "💼 LinkedIn" if platform == "linkedin" else "🐦 X/Twitter" if platform == "x" else "📍 Reddit"
+    author = item.get("author") or item.get("author_name") or ""
+    post_url = item.get("post_url") or ""
+
+    if status == "published":
+        text = (
+            f"✅ *Комментарий опубликован!*\n\n"
+            f"{platform_badge} — {html_mod.escape(author)}\n"
+            f"💬 _{html_mod.escape((item.get('selected_comment') or item.get('comment') or '')[:200])}_"
+        )
+    else:
+        text = (
+            f"❌ *Ошибка публикации*\n\n"
+            f"{platform_badge} — {html_mod.escape(author)}\n"
+            f"{html_mod.escape(error_msg[:200]) if error_msg else 'Неизвестная ошибка'}"
+        )
+
+    buttons = []
+    if post_url:
+        buttons.append([InlineKeyboardButton("🔗 Открыть пост", url=post_url)])
+
+    await app.bot.send_message(
+        chat_id=int(user_id),
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+        disable_web_page_preview=True,
+    )
 
 
 # ── Bot Setup ─────────────────────────────────────────

@@ -5,6 +5,8 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteMsg, setInviteMsg] = useState(null)
   const [inviteCopied, setInviteCopied] = useState(false)
+  const [doLike, setDoLike] = useState(false)
+  const [doConnect, setDoConnect] = useState(false)
 
   const isLinkedIn = item.platform === 'linkedin'
   const isX = item.platform === 'x' || item.platform === 'twitter'
@@ -89,7 +91,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
     }, 300)
 
     // Also trigger the approve callback to track it
-    if (onApprove) onApprove()
+    if (onApprove) onApprove({ doLike, doConnect })
   }
 
   // Open post for liking
@@ -268,6 +270,30 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
 
       {/* ═══ SEMI-AUTO ACTION BUTTONS (Copy-to-Clipboard workflow) ═══ */}
       <div className="queue-card-actions-semi">
+        {/* Like & Connect Toggles (Phase 2) */}
+        <div className="flex gap-2 mb-3">
+          <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: '#64748b' }}>
+            <input
+              type="checkbox"
+              checked={doLike}
+              onChange={(e) => setDoLike(e.target.checked)}
+              className="rounded"
+              style={{ accentColor: platformColor }}
+            />
+            👍 {L.like}
+          </label>
+          <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: '#64748b' }}>
+            <input
+              type="checkbox"
+              checked={doConnect}
+              onChange={(e) => setDoConnect(e.target.checked)}
+              className="rounded"
+              style={{ accentColor: platformColor }}
+            />
+            🤝 {isLinkedIn ? 'Connect' : isX ? 'Follow' : 'Join'}
+          </label>
+        </div>
+
         {/* Primary: Copy & Open */}
         <button
           className="queue-btn-primary"

@@ -233,6 +233,35 @@
     }
   }
 
+  /**
+   * Auto-submit the reply by clicking the Reply button.
+   */
+  async function autoSubmitReply() {
+    try {
+      // Find the reply/submit button
+      const replyBtn = document.querySelector('[data-testid="tweetButton"]')
+      if (replyBtn) {
+        replyBtn.click()
+        await sleep(1000)
+        return { ok: true, submitted: true, note: 'Reply posted automatically.' }
+      }
+
+      // Try alternative selectors
+      const buttons = document.querySelectorAll('[data-testid$="Button"]')
+      for (const btn of buttons) {
+        if (btn.textContent?.toLowerCase().includes('reply')) {
+          btn.click()
+          await sleep(1000)
+          return { ok: true, submitted: true, note: 'Reply posted automatically.' }
+        }
+      }
+
+      return { ok: false, error: 'Reply button not found. Please click Reply manually.' }
+    } catch (err) {
+      return { ok: false, error: `Auto-submit failed: ${err.message}` }
+    }
+  }
+
   // ─── Message Listener ────────────────────────────────
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -242,6 +271,12 @@
     if (message.type === 'ENGAGR_PREPARE_X_REPLY') {
       prepareReply(message.payload).then(sendResponse)
       return true // async response
+    }
+
+    // Auto-submit reply
+    if (message.type === 'ENGAGR_AUTO_SUBMIT_X_REPLY') {
+      autoSubmitReply().then(sendResponse)
+      return true
     }
 
     // Like action

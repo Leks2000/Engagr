@@ -101,7 +101,7 @@ Reddit discovery additionally runs on the backend (public JSON) as a fallback wh
 | 0.5 | Remove **Simulate** from production UI (dev flag only) | Queue UI | [x] |
 | 0.6 | Auto-generate 3 AI variants on `posts/push` (setting: on/off) | `backend/main.py` | [x] |
 | 0.7 | Keyword filter on `posts/push` | `backend/main.py` | [x] |
-| 0.8 | Telegram notification + deep link to Mini App Queue | `backend/telegram_bot.py` | [ ] |
+| 0.8 | Telegram notification + deep link to Mini App Queue | `backend/telegram_bot.py` | [x] |
 
 **Done when:** Extension scan → post appears in Mini App with comment variants → user can edit → approve.
 
@@ -113,12 +113,12 @@ Reddit discovery additionally runs on the backend (public JSON) as a fallback wh
 
 | ID | Task | Area | Done |
 |----|------|------|------|
-| 1.1 | Fix approve: `source: extension_autoscan` → extension path, not `queue_executor` | `backend/main.py` | [ ] |
-| 1.2 | X items: UI shows "runs in browser", never server executor | Queue UI + API | [ ] |
-| 1.3 | Extension polls approved tasks and auto-executes | `extension/src/background.js` | [ ] |
-| 1.4 | Semi-auto → full auto: extension clicks Post/Reply after approve | `*_actions.js` | [ ] |
-| 1.5 | Status lifecycle: `approved` → `executing` → `published` / `failed` | backend + extension | [ ] |
-| 1.6 | Telegram notification on published / failed | `backend/telegram_bot.py` | [ ] |
+| 1.1 | Fix approve: `source: extension_autoscan` → extension path, not `queue_executor` | `backend/main.py` | [x] |
+| 1.2 | X items: UI shows "runs in browser", never server executor | Queue UI + API | [x] |
+| 1.3 | Extension polls approved tasks and auto-executes | `extension/src/background.js` | [x] |
+| 1.4 | Semi-auto → full auto: extension clicks Post/Reply after approve | `*_actions.js` | [x] |
+| 1.5 | Status lifecycle: `approved` → `executing` → `published` / `failed` | backend + extension | [x] |
+| 1.6 | Telegram notification on published / failed | `backend/telegram_bot.py` | [x] |
 
 **Done when:** Approve in Mini App → comment live on platform within 1–3 min, status updated in UI.
 
@@ -130,10 +130,10 @@ Reddit discovery additionally runs on the backend (public JSON) as a fallback wh
 
 | ID | Task | Platform | Done |
 |----|------|----------|------|
-| 2.1 | Toggle **like** on card → extension action | LinkedIn, X, Reddit upvote | [ ] |
-| 2.2 | Toggle **connect / follow** on card | LinkedIn Connect, X Follow | [ ] |
-| 2.3 | Action chain with delays 30–180 sec between steps | `background.js` | [ ] |
-| 2.4 | Enforce daily limits (comments / likes / connects) | backend + extension | [ ] |
+| 2.1 | Toggle **like** on card → extension action | LinkedIn, X, Reddit upvote | [x] |
+| 2.2 | Toggle **connect / follow** on card | LinkedIn Connect, X Follow | [x] |
+| 2.3 | Action chain with delays 30–180 sec between steps | `background.js` | [x] |
+| 2.4 | Enforce daily limits (comments / likes / connects) | backend + extension | [x] |
 
 **Done when:** Card with post + ☑ like + ☑ connect → approve → all steps execute in sequence.
 

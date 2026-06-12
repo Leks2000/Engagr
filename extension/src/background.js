@@ -10,6 +10,7 @@
  *  - Mini App context synchronization
  *  - Connection status tracking
  *  - AUTO FEED SCAN via chrome.alarms every 15 minutes (Sprint 1)
+ *  - AUTO EXECUTION: polls approved tasks and executes actions (Phase 1.3-1.5)
  */
 
 const DEFAULT_SETTINGS = {
@@ -71,8 +72,376 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 })
 
+// ─── Auto Execution (Phase 1.3-1.5) ────────────────────────
+
+// ─── Daily Limits (Phase 2.4) ────────────────────────────────
+
+const DAILY_LIMITS = {
+  linkedin_comments: 15,
+  linkedin_likes: 5,
+  linkedin_connects: 5,
+  reddit_comments: 15,
+  reddit_upvotes: 5,
+  x_replies: 15,
+  x_likes: 5,
+  x_follows: 5,
+}
+
+// Track daily counts in memory (reset at midnight UTC)
+let dailyCounts = {}
+let dailyCountsDate = new Date().toISOString().split('T')[0]
+
+function resetDailyCountsIfNeeded() {
+  const today = new Date().toISOString().split('T')[0]
+  if (today !== dailyCountsDate) {
+    dailyCounts = {}
+    dailyCountsDate = today
+  }
+}
+
+function incrementDailyCount(actionType) {
+  resetDailyCountsIfNeeded()
+  dailyCounts[actionType] = (dailyCounts[actionType] || 0) + 1
+}
+
+function getDailyCount(actionType) {
+  resetDailyCountsIfNeeded()
+  return dailyCounts[actionType] || 0
+}
+
+function checkDailyLimit(actionType) {
+  const limit = DAILY_LIMITS[actionType]
+  if (!limit) return true // No limit defined
+  const current = getDailyCount(actionType)
+  return current < limit
+}
+
+/**
+ * Execute approved tasks automatically.
+ * Called after polling to process any pending approved tasks.
+ * Supports action chains with delays between steps (Phase 2.3).
+ * Enforces daily limits (Phase 2.4).
+ */
+async function executeApprovedTasks(tasks) {
+  const settings = await chrome.storage.sync.get(['apiBaseUrl', 'jwtToken', 'telegramUserId'])
+  const { apiBaseUrl, jwtToken, telegramUserId } = settings
+  const baseUrl = (apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl).replace(/\/$/, '')
+
+  for (const task of tasks) {
+    if (task.status !== 'approved') continue
+    if (task.execution === 'executing') continue // already being processed
+
+    const platform = task.platform || 'linkedin'
+    const postUrl = task.post_url || ''
+
+    if (!postUrl) {
+      console.debug('[Engagr] Skipping task without post_url:', task.id)
+      continue
+    }
+
+    // Build action chain from task or use default single action
+    const actionChain = task.action_chain || [{ type: task.action || 'comment', comment: task.selected_comment || task.comment || '' }]
+
+    console.log(`[Engagr] Executing task ${task.id}: ${platform} (${actionChain.length} actions)`)
+
+    // Mark as executing
+    await updateTaskStatus(task.id, 'executing', baseUrl, jwtToken, telegramUserId)
+
+    let allSucceeded = true
+    let lastError = ''
+
+    // Execute each action in the chain with delays (Phase 2.3)
+    for (let i = 0; i < actionChain.length; i++) {
+      const actionStep = actionChain[i]
+
+      // 2.4: Check daily limit before executing
+      const limitKey = {
+        'comment': `${platform}_comments`,
+        'reply': `${platform}_replies`,
+        'like': `${platform}_likes`,
+        'upvote': `${platform}_upvotes`,
+        'connect': `${platform}_connects`,
+        'follow': `${platform}_follows`,
+      }[actionStep.type] || `${platform}_comments`
+
+      if (!checkDailyLimit(limitKey)) {
+        console.warn(`[Engagr] Daily limit reached for ${limitKey} (${getDailyCount(limitKey)}/${DAILY_LIMITS[limitKey]}). Skipping action.`)
+        lastError = `Daily limit reached for ${actionStep.type}`
+        // Don't fail the whole chain, just skip this action
+        continue
+      }
+
+      console.log(`[Engagr] Task ${task.id} step ${i + 1}/${actionChain.length}: ${actionStep.type}`)
+
+      try {
+        let result = null
+
+        if (platform === 'linkedin') {
+          result = await executeLinkedInAction(actionStep, task)
+        } else if (platform === 'x') {
+          result = await executeXAction(actionStep, task)
+        } else if (platform === 'reddit') {
+          result = await executeRedditAction(actionStep, task)
+        }
+
+        if (result?.ok) {
+          // Increment daily count on success
+          incrementDailyCount(limitKey)
+          console.log(`[Engagr] ${limitKey}: ${getDailyCount(limitKey)}/${DAILY_LIMITS[limitKey]}`)
+        } else {
+          allSucceeded = false
+          lastError = result?.error || 'Action failed'
+          console.warn(`[Engagr] Task ${task.id} step ${actionStep.type} failed:`, lastError)
+        }
+      } catch (err) {
+        allSucceeded = false
+        lastError = err.message
+        console.error(`[Engagr] Task ${task.id} step ${actionStep.type} error:`, err.message)
+      }
+
+      // Delay between actions in chain (30-180 seconds) - Phase 2.3
+      if (i < actionChain.length - 1) {
+        const delay = 30000 + Math.random() * 150000
+        console.log(`[Engagr] Waiting ${Math.round(delay / 1000)}s before next action`)
+        await new Promise(r => setTimeout(r, delay))
+      }
+    }
+
+    // Report final status
+    if (allSucceeded) {
+      await reportExecutionStatus(task, 'published', baseUrl, jwtToken, telegramUserId)
+      console.log(`[Engagr] Task ${task.id} completed successfully`)
+    } else {
+      await reportExecutionStatus(task, 'failed', baseUrl, jwtToken, telegramUserId, lastError)
+      console.warn(`[Engagr] Task ${task.id} failed:`, lastError)
+    }
+
+    // Delay between tasks (30-180 seconds)
+    const delay = 30000 + Math.random() * 150000
+    console.log(`[Engagr] Waiting ${Math.round(delay / 1000)}s before next task`)
+    await new Promise(r => setTimeout(r, delay))
+  }
+}
+
+/**
+ * Execute a single LinkedIn action.
+ */
+async function executeLinkedInAction(actionStep, task) {
+  const postUrl = task.post_url
+  const actionType = actionStep.type
+
+  // Find or create LinkedIn tab
+  const tab = await findOrCreateTab(postUrl, ['https://www.linkedin.com/*'])
+  if (!tab?.id) return { ok: false, error: 'Could not open LinkedIn tab' }
+
+  // Wait for page to load
+  await new Promise(r => setTimeout(r, 3000))
+
+  // Inject action scripts if needed
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['src/linkedin_actions.js'],
+    })
+    await new Promise(r => setTimeout(r, 500))
+  } catch (e) {
+    // Script might already be injected
+  }
+
+  if (actionType === 'comment') {
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_PREPARE_COMMENT',
+      payload: { url: postUrl, comment: actionStep.comment || '' },
+    })
+
+    if (result?.ok) {
+      // Auto-submit
+      await new Promise(r => setTimeout(r, 1000))
+      const postResult = await chrome.tabs.sendMessage(tab.id, {
+        type: 'ENGAGR_AUTO_SUBMIT_COMMENT',
+        payload: {},
+      })
+      return postResult || result
+    }
+    return result
+  }
+
+  if (actionType === 'like') {
+    return await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_LIKE_POST',
+      payload: { url: postUrl },
+    })
+  }
+
+  if (actionType === 'connect') {
+    return await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_PREPARE_CONNECT',
+      payload: { url: postUrl, message: actionStep.message || '' },
+    })
+  }
+
+  return { ok: false, error: `Unknown LinkedIn action: ${actionType}` }
+}
+
+/**
+ * Execute a single X/Twitter action.
+ */
+async function executeXAction(actionStep, task) {
+  const postUrl = task.post_url
+  const actionType = actionStep.type
+
+  // Find or create X tab
+  const tab = await findOrCreateTab(postUrl, ['https://x.com/*', 'https://twitter.com/*'])
+  if (!tab?.id) return { ok: false, error: 'Could not open X tab' }
+
+  // Wait for page to load
+  await new Promise(r => setTimeout(r, 3000))
+
+  // Inject action scripts if needed
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['src/x_actions.js'],
+    })
+    await new Promise(r => setTimeout(r, 500))
+  } catch (e) {
+    // Script might already be injected
+  }
+
+  if (actionType === 'reply') {
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_PREPARE_X_REPLY',
+      payload: { url: postUrl, comment: actionStep.comment || '' },
+    })
+
+    if (result?.ok) {
+      // Auto-submit
+      await new Promise(r => setTimeout(r, 1000))
+      const submitResult = await chrome.tabs.sendMessage(tab.id, {
+        type: 'ENGAGR_AUTO_SUBMIT_X_REPLY',
+        payload: {},
+      })
+      return submitResult || result
+    }
+    return result
+  }
+
+  if (actionType === 'like') {
+    return await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_LIKE_X_TWEET',
+      payload: { url: postUrl },
+    })
+  }
+
+  if (actionType === 'follow') {
+    return await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_FOLLOW_X_USER',
+      payload: { url: postUrl },
+    })
+  }
+
+  return { ok: false, error: `Unknown X action: ${actionType}` }
+}
+
+/**
+ * Execute a single Reddit action.
+ */
+async function executeRedditAction(actionStep, task) {
+  const postUrl = task.post_url
+  const actionType = actionStep.type
+
+  // Find or create Reddit tab
+  const tab = await findOrCreateTab(postUrl, ['https://www.reddit.com/*', 'https://reddit.com/*'])
+  if (!tab?.id) return { ok: false, error: 'Could not open Reddit tab' }
+
+  // Wait for page to load
+  await new Promise(r => setTimeout(r, 3000))
+
+  // Reddit actions - basic implementation
+  if (actionType === 'comment') {
+    // TODO: Implement Reddit auto-comment via content script
+    return { ok: false, error: 'Reddit auto-comment not yet implemented' }
+  }
+
+  if (actionType === 'upvote') {
+    // TODO: Implement Reddit upvote via content script
+    return { ok: false, error: 'Reddit auto-upvote not yet implemented' }
+  }
+
+  return { ok: false, error: `Unknown Reddit action: ${actionType}` }
+}
+
+
+
+/**
+ * Find an existing tab matching patterns or create a new one.
+ */
+async function findOrCreateTab(url, urlPatterns) {
+  // Check for existing tab
+  const tabs = await chrome.tabs.query({ url: urlPatterns })
+  if (tabs.length > 0) {
+    // Update existing tab URL
+    await chrome.tabs.update(tabs[0].id, { url, active: true })
+    return tabs[0]
+  }
+
+  // Create new tab
+  return await chrome.tabs.create({ url, active: true })
+}
+
+/**
+ * Report execution status to backend.
+ */
+async function reportExecutionStatus(task, status, baseUrl, jwtToken, userId, error = '') {
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`
+
+    await fetch(`${baseUrl}/api/extension/execution/status`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        user_id: userId,
+        item_id: task.id,
+        status,
+        error,
+        platform: task.platform,
+        author: task.author || task.author_name,
+        post_url: task.post_url,
+        comment: task.selected_comment || task.comment,
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+  } catch (err) {
+    console.error('[Engagr] Failed to report execution status:', err.message)
+  }
+}
+
+/**
+ * Update task status via API.
+ */
+async function updateTaskStatus(taskId, status, baseUrl, jwtToken, userId) {
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`
+
+    const body = { status }
+    if (!jwtToken && userId) body.user_id = userId
+
+    await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(taskId)}/status`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    })
+  } catch (err) {
+    console.error('[Engagr] Failed to update task status:', err.message)
+  }
+}
+
 /**
  * Poll backend for pending tasks and update badge.
+ * Also triggers auto-execution of approved tasks (Phase 1.3-1.5).
  */
 async function pollTasks() {
   try {
@@ -107,7 +476,8 @@ async function pollTasks() {
     }
 
     const data = await response.json()
-    const taskCount = data.total || data.tasks?.length || 0
+    const tasks = data.tasks || []
+    const taskCount = data.total || tasks.length || 0
 
     await chrome.storage.sync.set({
       pendingTaskCount: taskCount,
@@ -118,9 +488,17 @@ async function pollTasks() {
 
     // Store tasks locally for popup access
     await chrome.storage.local.set({
-      pendingTasks: data.tasks || [],
+      pendingTasks: tasks,
       lastPollAt: new Date().toISOString(),
     })
+
+    // 1.3: Auto-execute approved tasks
+    if (tasks.length > 0) {
+      // Don't await — run in background to avoid blocking polling
+      executeApprovedTasks(tasks).catch(err => {
+        console.error('[Engagr] Auto-execution error:', err.message)
+      })
+    }
   } catch (err) {
     // Silently fail — network might be unavailable
     console.debug('[Engagr] Poll failed:', err.message)

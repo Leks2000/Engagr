@@ -197,11 +197,11 @@ export default function Queue({ userId, language = 'en' }) {
   }
 
   // ── Queue actions ─────────────────────────────────────
-  const handleApprove = async (itemId) => {
+  const handleApprove = async (itemId, actions = {}) => {
     const item = queue.find(i => i.id === itemId)
     if (item?._simulated) { setQueue(q => q.filter(i => i.id !== itemId)); return }
     try {
-      await api.post(`/api/queue/${userId}/${itemId}/approve`)
+      await api.post(`/api/queue/${userId}/${itemId}/approve`, actions)
       setQueue(q => q.filter(i => i.id !== itemId))
     } catch (err) { console.error('Approve error:', err) }
   }
@@ -494,7 +494,7 @@ export default function Queue({ userId, language = 'en' }) {
               ) : (
                 <Card
                   item={item}
-                  onApprove={() => handleApprove(item.id)}
+                  onApprove={(actions) => handleApprove(item.id, actions)}
                   onEdit={() => handleEdit(item)}
                   onSkip={() => handleSkip(item.id)}
                   onRegenerate={() => handleRegenerate(item.id)}

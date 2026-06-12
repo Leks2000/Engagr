@@ -645,6 +645,77 @@ def extension_linkedin_action_complete(user_id, item_id):
         return jsonify({"error": str(e)}), 500
 
 
+@api.route("/api/extension/execution/status", methods=["POST"])
+def extension_execution_status():
+    """
+    Report execution status from extension (comment published/failed).
+    Triggers Telegram notification to user.
+    
+    Body: { "user_id": "...", "item_id": "...", "status": "published"|"failed", "error": "..." }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        user_id = body.get("user_id", "")
+        item_id = body.get("item_id", "")
+        status = body.get("status", "")
+        error_msg = body.get("error", "")
+
+        if not user_id or not item_id or not status:
+            return jsonify({"error": "user_id, item_id, and status required"}), 400
+
+        if status not in ("published", "failed"):
+            return jsonify({"error": "status must be 'published' or 'failed'"}), 400
+
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            # Item might have been removed already, create minimal item for notification
+            item = {
+                "id": item_id,
+                "platform": body.get("platform", "linkedin"),
+                "author": body.get("author", ""),
+                "post_url": body.get("post_url", ""),
+                "selected_comment": body.get("comment", ""),
+            }
+
+        # Send Telegram notification
+        import asyncio as _asyncio
+        _asyncio.run_coroutine_threadsafe(
+            telegram_bot.send_execution_status(user_id, item, status, error_msg),
+            _loop,
+        )
+
+        # Update stats if published
+        if status == "published":
+            storage.increment_stat(user_id, {
+                "linkedin_comments": "linkedin_comments",
+                "linkedin_likes": "linkedin_likes",
+                "reddit_comments": "reddit_comments",
+                "x_replies": "x_replies",
+            }.get(f"{item.get('platform', 'linkedin')}_{item.get('action', 'comment')}s", "linkedin_comments"))
+
+            # Record interaction
+            try:
+                interaction_memory.record_interaction(
+                    user_id=user_id,
+                    author_name=item.get("author", "") or item.get("author_name", ""),
+                    author_profile_url=item.get("post_url", ""),
+                    platform=item.get("platform", "linkedin"),
+                    interaction_type=item.get("action", "comment"),
+                    post_url=item.get("post_url", ""),
+                    our_message=item.get("selected_comment") or item.get("comment", ""),
+                )
+            except Exception as e:
+                logger.error("Failed to record interaction: %s", e)
+
+        # Remove from queue
+        storage.remove_from_queue(user_id, item_id)
+
+        return jsonify({"ok": True, "status": status})
+    except Exception as e:
+        logger.error("Extension execution status error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @api.route("/api/extension/linkedin/actions/<user_id>/<item_id>/dismiss", methods=["POST"])
 def extension_linkedin_action_dismiss(user_id, item_id):
     """Dismiss an approved extension item without publishing."""
@@ -915,26 +986,86 @@ def approve_item(user_id, item_id):
         if not item:
             return jsonify({"error": "Item not found"}), 404
 
-        if item.get("source") == "extension":
-            # Extension-found items are executed in the user's own browser via
-            # the WebBridge extension. The human performs the final publish,
-            # so no server-side automated posting is scheduled here.
-            storage.update_queue_item(user_id, item_id, {
-                "status": "approved",
-                "execution": "extension",
-                "approved_at": datetime.now(timezone.utc).isoformat(),
-            })
-            return jsonify({"status": "approved", "execution": "extension"})
+        source = item.get("source", "")
+        platform = item.get("platform", "")
 
-        storage.update_queue_item(user_id, item_id, {"status": "approved"})
+        # Parse additional actions from request body (Phase 2: like, connect)
+        body = request.get_json(silent=True) or {}
+        do_like = body.get("doLike", False)
+        do_connect = body.get("doConnect", False)
 
-        # Schedule posting in background
-        asyncio.run_coroutine_threadsafe(
-            _post_item_delayed(user_id, item),
-            _loop
-        )
+        # 2.4: Check daily limits before approving
+        stats = storage.get_stats(user_id)
+        today = datetime.now(timezone.utc).date().isoformat()
+        if stats.get("date") != today:
+            # Reset daily stats
+            stats = {**storage.DEFAULT_STATS, "date": today}
+            storage.save_stats(user_id, stats)
 
-        return jsonify({"status": "approved"})
+        # Check limits per action type
+        action = item.get("action", "comment")
+        stat_key = {
+            "comment": f"{platform}_comments",
+            "reply": f"{platform}_replies",
+            "like": f"{platform}_likes",
+            "upvote": f"{platform}_upvotes",
+            "connect": f"{platform}_connects",
+            "follow": f"{platform}_follows",
+        }.get(action, f"{platform}_comments")
+
+        current_count = stats.get(stat_key, 0)
+        limit_key = f"daily_{stat_key}_limit"
+        daily_limit = DAILY_LIMITS.get(stat_key, 15)
+
+        if current_count >= daily_limit:
+            return jsonify({
+                "error": f"Daily limit reached for {action} ({current_count}/{daily_limit})",
+                "limit_reached": True,
+                "current": current_count,
+                "limit": daily_limit,
+            }), 429
+
+        # Build action chain for extension
+        action_chain = []
+
+        # Primary action (comment/reply)
+        if action in ("comment", "reply"):
+            action_chain.append({"type": "comment", "comment": item.get("selected_comment") or item.get("comment", "")})
+
+        # Like action (Phase 2)
+        if do_like:
+            like_action = "like" if platform in ("linkedin", "x") else "upvote"
+            like_key = f"{platform}_likes" if platform in ("linkedin", "x") else f"{platform}_upvotes"
+            if stats.get(like_key, 0) >= DAILY_LIMITS.get(like_key, 5):
+                return jsonify({
+                    "error": f"Daily like limit reached ({stats.get(like_key, 0)}/{DAILY_LIMITS.get(like_key, 5)})",
+                    "limit_reached": True,
+                }), 429
+            action_chain.append({"type": like_action})
+
+        # Connect/Follow action (Phase 2)
+        if do_connect:
+            connect_action = "connect" if platform == "linkedin" else "follow" if platform == "x" else "join"
+            connect_key = f"{platform}_connects" if platform == "linkedin" else f"{platform}_follows"
+            if stats.get(connect_key, 0) >= DAILY_LIMITS.get(connect_key, 5):
+                return jsonify({
+                    "error": f"Daily connect limit reached ({stats.get(connect_key, 0)}/{DAILY_LIMITS.get(connect_key, 5)})",
+                    "limit_reached": True,
+                }), 429
+            action_chain.append({"type": connect_action, "message": item.get("invite_message", "")})
+
+        # All items now go through extension (Phase 1)
+        updates = {
+            "status": "approved",
+            "execution": "extension",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if action_chain:
+            updates["action_chain"] = action_chain
+
+        storage.update_queue_item(user_id, item_id, updates)
+
+        return jsonify({"status": "approved", "execution": "extension", "action_chain": action_chain})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

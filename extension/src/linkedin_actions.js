@@ -163,11 +163,35 @@
     }
   }
 
+  async function autoSubmitComment() {
+    // Find and click the "Post" button in the comment box
+    const postButton = findActionButton(document, ['post', 'отправить', 'comment'])
+    if (!postButton) {
+      // Try finding button by class or data attributes
+      const buttons = [...document.querySelectorAll('button')]
+      const submitBtn = buttons.find(btn => {
+        const text = btn.textContent?.toLowerCase() || ''
+        return text === 'post' || text === 'comment' || text === 'отправить'
+      })
+      if (submitBtn) {
+        submitBtn.click()
+        await sleep(1000)
+        return { ok: true, submitted: true, note: 'Comment posted automatically.' }
+      }
+      return { ok: false, error: 'Post button not found. Please click Post manually.' }
+    }
+
+    postButton.click()
+    await sleep(1000)
+    return { ok: true, submitted: true, note: 'Comment posted automatically.' }
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const handlers = {
       ENGAGR_PREPARE_COMMENT: prepareComment,
       ENGAGR_LIKE_POST: likePost,
       ENGAGR_PREPARE_CONNECT: prepareConnect,
+      ENGAGR_AUTO_SUBMIT_COMMENT: autoSubmitComment,
     }
 
     const handler = handlers[message?.type]
