@@ -158,7 +158,80 @@ Warm-up mode and random delays between actions are enabled by default.
 
 ---
 
+<<<<<<< HEAD
 ## Railway deployment
+=======
+## Daily Limits (Hard Caps)
+
+| Platform | Action     | Max/Day |
+|----------|-----------|---------|
+| LinkedIn | Comments   | 15      |
+| LinkedIn | Likes      | 5       |
+| LinkedIn | Connections| 5       |
+| Reddit   | Comments   | 15      |
+| Reddit   | Upvotes    | 5       |
+
+---
+
+## Anti-spam Delays
+
+| Action             | Delay Range     |
+|--------------------|-----------------|
+| Between comments   | 5–30 minutes    |
+| Between likes      | 2–7 minutes     |
+| Between connections| 3–10 minutes    |
+
+---
+
+## Bot Commands
+
+| Command       | Description                |
+|---------------|----------------------------|
+| `/start`      | Welcome + setup            |
+| `/dashboard`  | Today's stats              |
+| `/queue`      | Pending comments           |
+| `/settings`   | Open Mini App settings     |
+| `/digest`     | Get daily top-3 posts      |
+| `/connections`| View networking CRM        |
+| `/linkedin`   | LinkedIn setup guide       |
+| `/reddit`     | Reddit setup guide         |
+| `/pause`      | Pause all sessions         |
+| `/resume`     | Resume sessions            |
+
+---
+
+## Key Killer Features
+
+### 1. Humanness Scorer
+Posts are analyzed for AI-generated patterns (cliches, emoji spam, engagement bait). Only genuinely human posts appear in your queue.
+
+### 2. Interaction Memory (CRM)
+The app remembers who you've engaged with before. When the same author posts again, you get a notification: "You've interacted with them 3 times before. Keep building this relationship!"
+
+### 3. News Jacking
+First comments under viral posts get 90% of views. The system monitors RSS feeds and alerts you to trending topics matching your keywords.
+
+### 4. Nested Conversation Booster
+When someone replies to your AI comment, the app generates a follow-up reply to keep the conversation going and convert leads.
+
+### 5. Daily Digest
+Every morning, you receive 3 top posts with ready-made comments in Telegram. One tap to copy + open.
+
+---
+#Work process
+```mermaid
+flowchart LR
+    EXT[Chrome Extension<br/>авто-парсинг X / LinkedIn / Reddit]
+    API[Backend + AI]
+    TG[Telegram Mini App<br/>управление постами и ответами]
+    EXT -->|новые посты| API
+    API -->|очередь| TG
+    TG -->|approve / edit / skip / like| EXT
+```
+---
+
+## Railway Deployment
+>>>>>>> ba736018ed3c76cc7a3cc11841a3525ea26d6b77
 
 1. Push to GitHub
 2. [railway.app](https://railway.app) → Deploy from GitHub
