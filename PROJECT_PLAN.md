@@ -94,13 +94,13 @@ Reddit discovery additionally runs on the backend (public JSON) as a fallback wh
 
 | ID | Task | Area | Done |
 |----|------|------|------|
-| 0.1 | Extend `GET /api/queue/<user_id>` — support `?status=new_post,pending,approved` | `backend/main.py` | [ ] |
-| 0.2 | Queue UI: tabs **New** / **For review** | `frontend/src/screens/Queue.jsx` | [ ] |
-| 0.3 | Button **Generate reply** for `new_post` items | API + Queue UI | [ ] |
-| 0.4 | Add **X** platform filter in Queue | Queue UI | [ ] |
-| 0.5 | Remove **Simulate** from production UI (dev flag only) | Queue UI | [ ] |
-| 0.6 | Auto-generate 3 AI variants on `posts/push` (setting: on/off) | `backend/main.py` | [ ] |
-| 0.7 | Keyword filter on `posts/push` | `backend/main.py` | [ ] |
+| 0.1 | Extend `GET /api/queue/<user_id>` — support `?status=new_post,pending,approved` | `backend/main.py` | [x] |
+| 0.2 | Queue UI: tabs **New** / **For review** | `frontend/src/screens/Queue.jsx` | [x] |
+| 0.3 | Button **Generate reply** for `new_post` items | API + Queue UI | [x] |
+| 0.4 | Add **X** platform filter in Queue | Queue UI | [x] |
+| 0.5 | Remove **Simulate** from production UI (dev flag only) | Queue UI | [x] |
+| 0.6 | Auto-generate 3 AI variants on `posts/push` (setting: on/off) | `backend/main.py` | [x] |
+| 0.7 | Keyword filter on `posts/push` | `backend/main.py` | [x] |
 | 0.8 | Telegram notification + deep link to Mini App Queue | `backend/telegram_bot.py` | [ ] |
 
 **Done when:** Extension scan → post appears in Mini App with comment variants → user can edit → approve.

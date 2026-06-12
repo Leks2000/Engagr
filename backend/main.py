@@ -660,18 +660,30 @@ def extension_linkedin_action_dismiss(user_id, item_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _call_with_supported_kwargs(func, *args, **kwargs):
+    """
+    Call a function passing only the keyword arguments it actually accepts.
+    Prevents TypeError when a function signature doesn't include some kwargs.
+    """
+    import inspect
+    sig = inspect.signature(func)
+    supported = set(sig.parameters.keys())
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+    return func(*args, **filtered_kwargs)
+
+
 # ── Extension Posts Push (Sprint 1 Auto-Scan) ─────────
 
 @api.route("/api/extension/posts/push", methods=["POST"])
 def extension_posts_push():
     """
     Receive posts scanned by the Chrome Extension (auto-scan every 15 min).
-    Filter out already-seen posts, then push new ones to Telegram as
-    inline-button cards so the user can generate & send a comment.
+    Filter out already-seen posts, apply keyword filter, generate AI comment
+    variants (3), then save with status=pending (or new_post on AI failure).
 
     Body:
       {
-        "posts": [{"author": "...", "post": "...", "url": "...", "platform": "linkedin"|"x"}],
+        "posts": [{"author": "...", "post": "...", "url": "...", "platform": "linkedin"|"x"|"reddit"}],
         "user_id": "...",       # optional if Bearer token present
         "scanned_at": "..."
       }
@@ -698,6 +710,32 @@ def extension_posts_push():
         if not isinstance(raw_posts, list) or not raw_posts:
             return jsonify({"error": "posts array required", "pushed": 0}), 400
 
+        # Load user settings (keywords, AI flag, tone)
+        settings = storage.get_settings(user_id)
+        user_language = settings.get("language", "en")
+        auto_generate_ai = settings.get("auto_generate_ai", True)
+
+        # Build keyword sets per platform for optional filtering
+        li_keywords = [k.lower().strip() for k in (settings.get("linkedin") or {}).get("keywords", []) if k.strip()]
+        rd_keywords = [k.lower().strip() for k in (settings.get("reddit") or {}).get("keywords", []) if k.strip()]
+        x_keywords  = [k.lower().strip() for k in (settings.get("x") or {}).get("keywords", []) if k.strip()]
+
+        def _keywords_for(platform: str) -> list:
+            if platform == "linkedin":
+                return li_keywords
+            if platform == "reddit":
+                return rd_keywords
+            if platform in ("x", "twitter"):
+                return x_keywords
+            return []
+
+        def _passes_keyword_filter(post_text: str, platform: str) -> bool:
+            kws = _keywords_for(platform)
+            if not kws:
+                return True  # no filter configured → accept all
+            text_lower = post_text.lower()
+            return any(kw in text_lower for kw in kws)
+
         # Load existing queue to deduplicate
         queue = storage.get_queue(user_id)
         existing_keys = {
@@ -707,6 +745,7 @@ def extension_posts_push():
 
         pushed = 0
         skipped = 0
+        keyword_filtered = 0
         new_items = []
 
         for raw in raw_posts:
@@ -715,12 +754,19 @@ def extension_posts_push():
                 continue
 
             post_text = (raw.get("post") or raw.get("post_text") or "").strip()
-            post_url = (raw.get("url") or raw.get("post_url") or "").strip()
-            author = (raw.get("author") or "Unknown").strip()
-            platform = (raw.get("platform") or "linkedin").lower()
+            post_url  = (raw.get("url") or raw.get("post_url") or "").strip()
+            author    = (raw.get("author") or "Unknown").strip()
+            platform  = (raw.get("platform") or "linkedin").lower()
+            if platform == "twitter":
+                platform = "x"
 
             if not post_text or len(post_text) < 10:
                 skipped += 1
+                continue
+
+            # ── 0.7 Keyword filter ───────────────────────────
+            if not _passes_keyword_filter(post_text, platform):
+                keyword_filtered += 1
                 continue
 
             # Deduplicate by URL or first 120 chars of text
@@ -741,13 +787,49 @@ def extension_posts_push():
                 "post_text": post_text,
                 "author": author,
                 "author_name": author,
-                "comment": "",          # empty until user generates
+                "comment": "",
                 "selected_comment": "",
                 "comment_variants": [],
-                "status": "new_post",   # special status — waiting for user to generate comment
+                "post_language": "en",
+                "user_language": user_language,
+                "status": "new_post",   # will be upgraded to pending after AI
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "scanned_at": body.get("scanned_at", ""),
             }
+
+            # ── 0.6 Auto-generate AI variants ────────────────
+            if auto_generate_ai:
+                try:
+                    tone = (
+                        ((settings.get(platform) or settings.get("linkedin") or {}).get("tone"))
+                        or "friendly"
+                    )
+                    comment_data = _call_with_supported_kwargs(
+                        ai_comment.generate_comment_variants,
+                        post_text,
+                        user_language=user_language,
+                        platform=platform,
+                        tone=tone,
+                        user_id=user_id,
+                    )
+                    variants = comment_data.get("variants") or []
+                    if variants:
+                        item["comment_variants"] = variants
+                        item["selected_comment"] = variants[0]
+                        item["comment"]          = variants[0]
+                        item["post_language"]    = comment_data.get("post_language", "en")
+                        item["status"]           = "pending"
+                        logger.info(
+                            "AI variants generated for %s post (user=%s platform=%s)",
+                            platform, user_id, platform,
+                        )
+                except Exception as ai_err:
+                    logger.warning(
+                        "AI generation failed for autoscan post user=%s: %s — saving as new_post",
+                        user_id, ai_err,
+                    )
+                    # keep status = new_post so user can retry in UI
+
             storage.add_to_queue(user_id, item)
             new_items.append(item)
             pushed += 1
@@ -757,13 +839,14 @@ def extension_posts_push():
             _push_posts_to_telegram(user_id, new_items)
 
         logger.info(
-            "extension/posts/push user=%s pushed=%d skipped=%d",
-            user_id, pushed, skipped,
+            "extension/posts/push user=%s pushed=%d skipped=%d keyword_filtered=%d",
+            user_id, pushed, skipped, keyword_filtered,
         )
         return jsonify({
             "ok": True,
             "pushed": pushed,
             "skipped": skipped,
+            "keyword_filtered": keyword_filtered,
             "user_id": user_id,
         })
 
@@ -773,6 +856,7 @@ def extension_posts_push():
 
 
 def _push_posts_to_telegram(user_id: str, items: list):
+
     """
     Send newly scanned post cards to the user's Telegram chat.
     Runs in a fire-and-forget background thread.
@@ -797,10 +881,29 @@ def _push_posts_to_telegram(user_id: str, items: list):
 
 @api.route("/api/queue/<user_id>", methods=["GET"])
 def get_queue(user_id):
+    """
+    Return queue items optionally filtered by status.
+
+    Query params:
+      ?status=pending            — only pending (default + new_post for Mini App)
+      ?status=new_post,pending   — comma-separated list
+      ?status=all                — everything in the queue
+    """
     try:
         queue = storage.get_queue(user_id)
-        pending = [q for q in queue if q.get("status") == "pending"]
-        return jsonify(pending)
+
+        status_param = request.args.get("status", "pending,new_post").strip()
+
+        if status_param == "all":
+            result = queue
+        else:
+            allowed = {s.strip() for s in status_param.split(",") if s.strip()}
+            result = [q for q in queue if q.get("status") in allowed]
+
+        # Sort: newest first
+        result = sorted(result, key=lambda x: x.get("created_at", ""), reverse=True)
+
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -896,18 +999,73 @@ def regenerate_item(user_id, item_id):
             return jsonify({"error": "Item not found"}), 404
 
         settings = storage.get_settings(user_id)
-        tone = ((settings.get("linkedin") or {}).get("tone", "friendly"))
+        platform = item.get("platform", "linkedin")
+        tone = (
+            ((settings.get(platform) or settings.get("linkedin") or {}).get("tone"))
+            or "friendly"
+        )
+        user_language = settings.get("language", "en")
+        post_text = item.get("post_text", "")
+
+        # 0.3: new_post -> generate 3 variants, upgrade to pending
+        if item.get("status") == "new_post":
+            comment_data = _call_with_supported_kwargs(
+                ai_comment.generate_comment_variants,
+                post_text,
+                user_language=user_language,
+                platform=platform,
+                tone=tone,
+                user_id=user_id,
+            )
+            variants = comment_data.get("variants") or []
+            if not variants:
+                variants = ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."]
+            selected = variants[0]
+            storage.update_queue_item(user_id, item_id, {
+                "comment_variants": variants,
+                "selected_comment": selected,
+                "comment": selected,
+                "post_language": comment_data.get("post_language", "en"),
+                "status": "pending",
+            })
+            return jsonify({
+                "status": "generated",
+                "comment": selected,
+                "variants": variants,
+                "post_language": comment_data.get("post_language", "en"),
+            })
+
+        # Regular regenerate for pending/approved items
+        # Guard: post_text required for meaningful AI generation
+        if not post_text or len(post_text) < 5:
+            return jsonify({"error": "post_text is missing or too short to regenerate"}), 400
+
+        previous_comment = item.get("comment") or item.get("selected_comment") or ""
         new_comment = ai_comment.regenerate_comment(
-            item.get("post_text", ""),
-            item.get("comment", ""),
-            item.get("platform", "linkedin"),
+            post_text,
+            previous_comment,
+            platform,
             tone=tone,
             user_id=user_id,
         )
 
-        storage.update_queue_item(user_id, item_id, {"comment": new_comment})
-        return jsonify({"status": "regenerated", "comment": new_comment})
+        # Append new variant to existing list so UI retains history
+        existing_variants = list(item.get("comment_variants") or [])
+        if new_comment not in existing_variants:
+            existing_variants.append(new_comment)
+
+        storage.update_queue_item(user_id, item_id, {
+            "comment": new_comment,
+            "selected_comment": new_comment,
+            "comment_variants": existing_variants,
+        })
+        return jsonify({
+            "status": "regenerated",
+            "comment": new_comment,
+            "variants": existing_variants,
+        })
     except Exception as e:
+        logger.error("regenerate_item error user=%s item=%s: %s", user_id, item_id, e)
         return jsonify({"error": str(e)}), 500
 
 

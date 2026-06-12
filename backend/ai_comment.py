@@ -242,13 +242,18 @@ def regenerate_comment(post_text: str, previous_comment: str, platform: str = "l
         if user_id:
             memory_context = user_memory.build_ai_context(user_id)
 
+        prev_instruction = (
+            f"Previous comment (write something DIFFERENT): {previous_comment}\n\n"
+            if previous_comment and previous_comment.strip()
+            else ""
+        )
         user_prompt = (
             f"Platform: {platform.upper()}\n"
             f"Requested tone: {(tone or 'friendly').lower()} ({tone_hint})\n"
             + (f"{memory_context}\n\n" if memory_context else "")
             + f"Post content:\n{post_text[:500]}\n\n"
-            f"Previous comment (write something DIFFERENT): {previous_comment}\n\n"
-            f"Write a new comment (3-20 words, match post language):"
+            + prev_instruction
+            + f"Write a new comment (3-20 words, match post language):"
         )
 
         response = client.chat.completions.create(

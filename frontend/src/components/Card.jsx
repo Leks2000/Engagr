@@ -7,8 +7,9 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
   const [inviteCopied, setInviteCopied] = useState(false)
 
   const isLinkedIn = item.platform === 'linkedin'
-  const platformColor = isLinkedIn ? '#0A66C2' : '#FF4500'
-  const platformBg = isLinkedIn ? '#eff6ff' : '#fff5f2'
+  const isX = item.platform === 'x' || item.platform === 'twitter'
+  const platformColor = isLinkedIn ? '#0A66C2' : isX ? '#1a1a1a' : '#FF4500'
+  const platformBg = isLinkedIn ? '#eff6ff' : isX ? '#f1f5f9' : '#fff5f2'
 
   const authorName = item.author_name || item.author || ''
   const initials = authorName
@@ -192,7 +193,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
             </span>
           )}
           <span className={`badge badge-${item.platform}`}>
-            {isLinkedIn ? 'LinkedIn' : 'Reddit'}
+            {isLinkedIn ? 'LinkedIn' : isX ? 'X' : 'Reddit'}
           </span>
         </div>
       </div>

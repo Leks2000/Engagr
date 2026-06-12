@@ -328,6 +328,13 @@ input[type="range"]::-moz-range-thumb {
   color: white;
 }
 
+.badge-x,
+.badge-twitter {
+  background: #1a1a1a;
+  color: white;
+}
+
+
 /* ── Status Dot ──────────────────────────────── */
 .status-dot {
   width: 8px;
