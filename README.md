@@ -338,6 +338,17 @@ When someone replies to your AI comment, the app generates a follow-up reply to 
 Every morning, you receive 3 top posts with ready-made comments in Telegram. One tap to copy + open.
 
 ---
+#Work process
+```mermaid
+flowchart LR
+    EXT[Chrome Extension<br/>авто-парсинг X / LinkedIn / Reddit]
+    API[Backend + AI]
+    TG[Telegram Mini App<br/>управление постами и ответами]
+    EXT -->|новые посты| API
+    API -->|очередь| TG
+    TG -->|approve / edit / skip / like| EXT
+```
+---
 
 ## Railway Deployment
 
