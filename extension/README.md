@@ -1,62 +1,33 @@
-# Engagr WebBridge Extension
+# Engagr WebBridge (Chrome Extension)
 
-Personal Chrome Extension MVP for connecting browser workflows with the Engagr Telegram Mini App.
+Browser bridge for Engagr: parses LinkedIn / X / Reddit feeds and executes approved actions.
 
-## v0.1 scope
+**Project plan:** [../PROJECT_PLAN.md](../PROJECT_PLAN.md)
 
-- Manifest V3 extension shell.
-- Popup UI inspired by the WebBridge reference.
-- Mini App context auto-synced into `chrome.storage.sync`; no manual extension form.
-- Mini App connection check.
-- Active-tab LinkedIn detection.
-- Read-only LinkedIn feed parser that extracts author, post text, and post URL.
-- AI comment generation/regeneration for parsed LinkedIn posts through the Engagr API.
-- Automatic queue handoff from matched LinkedIn posts to the Mini App approval queue.
+## Install
 
-## Non-goals for v0.1
+1. `chrome://extensions` → Developer mode → **Load unpacked** → this `extension/` folder
+2. Connect via 5-minute login code from Mini App → Settings
+3. Keep platform tabs open for auto-scan (every 15 min)
 
-- No backend inside the extension.
-- No database.
-- No automatic publishing.
-- No binary assets.
-- No multi-account support.
+## What it does
 
-## Local install
+| Feature | File |
+|---------|------|
+| Auto-scan alarm (15 min) | `src/background.js` |
+| LinkedIn parser | `src/linkedin_parser.js` |
+| X parser | `src/x_parser.js` |
+| Reddit parser | `src/reddit_parser.js` |
+| Comment / like / connect | `src/linkedin_actions.js` |
+| Reply / like | `src/x_actions.js` |
+| Mini App context sync | `src/miniapp_bridge.js` |
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select this `extension/` directory.
-5. Open the Engagr Mini App once, then open LinkedIn and click the extension popup.
+## API endpoints used
 
+- `POST /api/extension/posts/push` — send scanned posts
+- `GET /api/tasks` — poll approved tasks
+- `POST /api/auth/extension-verify` — login with code
 
-## Parser output
+## Note
 
-The LinkedIn parser returns an array shaped like:
-
-```json
-[
-  {
-    "author": "...",
-    "post": "...",
-    "url": "..."
-  }
-]
-```
-
-
-## AI comments
-
-The popup sends parsed posts to the Engagr API:
-
-```text
-POST /api/extension/linkedin/comment/<user_id>
-POST /api/extension/linkedin/regenerate/<user_id>
-```
-
-Returned comments are saved in `chrome.storage.local` next to the parsed post preview, then matched posts can be pushed into the Mini App approval queue. The extension still does not publish anything automatically.
-
-
-## Mini App sync
-
-The extension is only a browser bridge. It does not ask the user to fill Telegram user ID, API URL, or provider fields. The Mini App posts the current user context to the extension content script, and the extension stores it automatically for LinkedIn parsing and AI comment generation.
+`manifest.json` must exist in this folder to load the extension. If missing from git, create it from the MV3 template in project history or ask in issues.

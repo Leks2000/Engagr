@@ -1,16 +1,32 @@
-# React + Vite
+# Engagr Mini App (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Telegram WebApp built with React + Vite.
 
-Currently, two official plugins are available:
+**Project plan:** [../PROJECT_PLAN.md](../PROJECT_PLAN.md)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Dev
 
-## React Compiler
+```bash
+npm install
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+API URL: set `VITE_API_URL` in `.env` or defaults to production Railway.
 
-## Expanding the ESLint configuration
+## Key screens
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+| Screen | File | Role |
+|--------|------|------|
+| App shell + nav | `src/App.jsx` | Routing, API client, extension bridge |
+| Queue | `src/screens/Queue.jsx` | Approve / edit / skip |
+| Dashboard | `src/screens/Dashboard.jsx` | Stats, run sessions (being simplified) |
+| Control Center | `src/screens/ControlCenter.jsx` | Extension login code |
+| Settings (per platform) | `LinkedInSettings.jsx`, `RedditSettings.jsx`, `XSettings.jsx` | Merging into unified Settings per plan |
+
+## Build
+
+```bash
+npm run build
+```
+
+Output: `dist/` — served by backend in dev or deployed to Vercel.
