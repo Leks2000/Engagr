@@ -118,7 +118,8 @@ export default function Queue({ userId, language = 'en' }) {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
-  const [bulkLoading, setBulkLoading] = useState(false)
+  // eslint-disable-next-line no-unused-vars
+  const [_bulkLoading, _setBulkLoading] = useState(false)
   const [simulating, setSimulating] = useState(false)
   // 0.3 — per-item AI generation state
   const [generatingIds, setGeneratingIds] = useState(new Set())
@@ -178,7 +179,7 @@ export default function Queue({ userId, language = 'en' }) {
     setGenerateErrors(prev => ({ ...prev, [itemId]: null }))
 
     try {
-      const result = await api.post(`/api/queue/${userId}/${itemId}/regenerate`)
+      await api.post(`/api/queue/${userId}/${itemId}/regenerate`)
       // After successful generation, backend sets status to pending
       // Reload to get updated item
       await loadQueue()
@@ -215,28 +216,28 @@ export default function Queue({ userId, language = 'en' }) {
     } catch (err) { console.error('Skip error:', err) }
   }
 
+  // Bulk approve/skip intentionally hidden — every action requires individual review
+  // (kept for future use, not exposed in UI)
+  // eslint-disable-next-line no-unused-vars
   const handleApproveAll = async () => {
-    setBulkLoading(true)
     for (const item of [...activeList]) {
       if (item._simulated) { setQueue(q => q.filter(i => i.id !== item.id)); continue }
       try {
         await api.post(`/api/queue/${userId}/${item.id}/approve`)
         setQueue(q => q.filter(i => i.id !== item.id))
-      } catch {}
+      } catch { /* ignored */ }
     }
-    setBulkLoading(false)
   }
 
+  // eslint-disable-next-line no-unused-vars
   const handleSkipAll = async () => {
-    setBulkLoading(true)
     for (const item of [...activeList]) {
       if (item._simulated) { setQueue(q => q.filter(i => i.id !== item.id)); continue }
       try {
         await api.post(`/api/queue/${userId}/${item.id}/skip`)
         setQueue(q => q.filter(i => i.id !== item.id))
-      } catch {}
+      } catch { /* ignored */ }
     }
-    setBulkLoading(false)
   }
 
   const handleRegenerate = async (itemId) => {
@@ -250,7 +251,14 @@ export default function Queue({ userId, language = 'en' }) {
     try {
       const result = await api.post(`/api/queue/${userId}/${itemId}/regenerate`)
       setQueue(q => q.map(i => i.id === itemId
-        ? { ...i, comment: result.comment, selected_comment: result.comment }
+        ? {
+            ...i,
+            status: 'pending',
+            comment: result.comment,
+            selected_comment: result.comment,
+            comment_variants: result.variants || i.comment_variants || [],
+            post_language: result.post_language || i.post_language,
+          }
         : i))
     } catch (err) { console.error('Regenerate error:', err) }
   }

@@ -762,18 +762,6 @@ def extension_linkedin_action_dismiss(user_id, item_id):
         return jsonify({"error": str(e)}), 500
 
 
-def _call_with_supported_kwargs(func, *args, **kwargs):
-    """
-    Call a function passing only the keyword arguments it actually accepts.
-    Prevents TypeError when a function signature doesn't include some kwargs.
-    """
-    import inspect
-    sig = inspect.signature(func)
-    supported = set(sig.parameters.keys())
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported}
-    return func(*args, **filtered_kwargs)
-
-
 # ── Extension Posts Push (Sprint 1 Auto-Scan) ─────────
 
 @api.route("/api/extension/posts/push", methods=["POST"])
