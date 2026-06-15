@@ -23,6 +23,11 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
 
   const variants = item.comment_variants || []
   const selectedComment = item.selected_comment || item.comment || ''
+  const createdAt = item.created_at ? new Date(item.created_at).toLocaleString() : '—'
+  const statusLabel = {
+    new_post: 'new_post', pending: 'pending', approved: 'approved',
+    executing: 'executing', published: 'published', failed: 'failed', skipped: 'skipped',
+  }[item.status] || item.status || 'pending'
 
   const isSimulated = item._simulated
   const hasInteraction = item.has_previous_interaction
@@ -30,68 +35,44 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
   const cardLabels = {
     en: {
       originalPost: 'Original Post', aiVariants: 'AI Comment Variants', viewPost: 'View post',
-      simTag: 'Simulated', post: 'Post', edit: 'Edit', skip: 'Skip', regen: 'Regen',
-      copyComment: 'Copy & Open', copied: 'Copied!', like: 'Like', invite: 'Invite',
+      simTag: 'Simulated', post: 'Approve', edit: 'Edit', skip: 'Skip', regen: 'Regen',
+      copyComment: 'Approve', copied: 'Approved!', like: 'Like', invite: 'Invite',
       inviteTitle: 'Connection Invite', inviteCopy: 'Copy Invite', inviteCopied: 'Copied!',
       humanScore: 'Human', interactionHint: 'Previous contact',
     },
     ru: {
       originalPost: 'Исходный пост', aiVariants: 'Варианты AI-комментариев', viewPost: 'Открыть',
-      simTag: 'Симуляция', post: 'Отправить', edit: 'Изменить', skip: 'Пропустить', regen: 'Обновить',
-      copyComment: 'Копировать и открыть', copied: 'Скопировано!', like: 'Лайк', invite: 'Инвайт',
+      simTag: 'Симуляция', post: 'Approve', edit: 'Изменить', skip: 'Пропустить', regen: 'Обновить',
+      copyComment: 'Approve', copied: 'Одобрено!', like: 'Лайк', invite: 'Инвайт',
       inviteTitle: 'Заявка в друзья', inviteCopy: 'Копировать', inviteCopied: 'Скопировано!',
       humanScore: 'Человек', interactionHint: 'Уже общались',
     },
     es: {
       originalPost: 'Post original', aiVariants: 'Variantes de IA', viewPost: 'Ver',
-      simTag: 'Simulado', post: 'Publicar', edit: 'Editar', skip: 'Saltar', regen: 'Regenerar',
-      copyComment: 'Copiar y abrir', copied: 'Copiado!', like: 'Me gusta', invite: 'Invitar',
+      simTag: 'Simulado', post: 'Aprobar', edit: 'Editar', skip: 'Saltar', regen: 'Regenerar',
+      copyComment: 'Aprobar', copied: 'Aprobado!', like: 'Me gusta', invite: 'Invitar',
       inviteTitle: 'Solicitud de conexion', inviteCopy: 'Copiar', inviteCopied: 'Copiado!',
       humanScore: 'Humano', interactionHint: 'Contacto previo',
     },
     de: {
       originalPost: 'Originalpost', aiVariants: 'KI-Kommentare', viewPost: 'Offnen',
-      simTag: 'Simuliert', post: 'Posten', edit: 'Bearbeiten', skip: 'Uberspringen', regen: 'Neu',
-      copyComment: 'Kopieren & offnen', copied: 'Kopiert!', like: 'Gefallt mir', invite: 'Einladen',
+      simTag: 'Simuliert', post: 'Freigeben', edit: 'Bearbeiten', skip: 'Uberspringen', regen: 'Neu',
+      copyComment: 'Freigeben', copied: 'Freigegeben!', like: 'Gefallt mir', invite: 'Einladen',
       inviteTitle: 'Verbindungsanfrage', inviteCopy: 'Kopieren', inviteCopied: 'Kopiert!',
       humanScore: 'Mensch', interactionHint: 'Fruherer Kontakt',
     },
   }
   const L = cardLabels[language] || cardLabels.en
 
-  // Copy comment to clipboard and open post URL
-  const handleCopyAndOpen = async () => {
-    const textToCopy = selectedComment || item.comment || ''
-    try {
-      await navigator.clipboard.writeText(textToCopy)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Fallback for older browsers
-      const ta = document.createElement('textarea')
-      ta.value = textToCopy
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
+  // Approval is the only action that allows the extension to execute.
+  // It does not copy/open/post directly from the Mini App.
+  const handleApproveClick = async () => {
+    if (!selectedComment) return
+    if (onApprove) {
+      await onApprove({ doLike, doConnect })
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
-
-    // Open post URL after a short delay
-    setTimeout(() => {
-      const url = item.post_url
-      if (!url || url.includes('sim')) return
-      // Try Telegram deep link first (for mobile)
-      if (window.Telegram?.WebApp?.openLink) {
-        window.Telegram.WebApp.openLink(url)
-      } else {
-        window.open(url, '_blank')
-      }
-    }, 300)
-
-    // Also trigger the approve callback to track it
-    if (onApprove) onApprove({ doLike, doConnect })
   }
 
   // Open post for liking
@@ -197,8 +178,13 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
           <span className={`badge badge-${item.platform}`}>
             {isLinkedIn ? 'LinkedIn' : isX ? 'X' : 'Reddit'}
           </span>
+          <span className="text-[10px] px-2 py-1 rounded-full font-semibold" style={{ background: '#f1f5f9', color: '#475569' }}>
+            {statusLabel}
+          </span>
         </div>
       </div>
+
+      <div className="text-[10px] mb-2" style={{ color: '#94a3b8' }}>Created: {createdAt}</div>
 
       {/* Post Excerpt */}
       <div className="queue-card-excerpt">
@@ -230,21 +216,26 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
             )}
           </div>
           {variants.map((variant, idx) => (
-            <label
+            <div
               key={idx}
               className={`queue-card-variant ${selectedComment === variant ? 'selected' : ''}`}
-              onClick={() => onSelectVariant && onSelectVariant(item.id, idx)}
               style={selectedComment === variant ? { borderColor: platformColor, background: platformBg, boxShadow: `0 0 0 1px ${platformColor}` } : {}}
             >
-              <input
-                type="radio"
-                name={`variant-${item.id}`}
-                checked={selectedComment === variant}
-                onChange={() => onSelectVariant && onSelectVariant(item.id, idx)}
-                style={{ accentColor: platformColor }}
-              />
-              <span className="queue-card-variant-text">{variant}</span>
-            </label>
+              <div className="flex items-start justify-between gap-2 w-full">
+                <div className="flex-1">
+                  <p className="text-[11px] font-semibold mb-1" style={{ color: platformColor }}>Variant {idx + 1}</p>
+                  <span className="queue-card-variant-text">{variant}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm flex-shrink-0"
+                  onClick={() => onSelectVariant && onSelectVariant(item.id, idx)}
+                  style={selectedComment === variant ? { background: platformColor, color: '#fff', borderColor: platformColor } : {}}
+                >
+                  {selectedComment === variant ? 'Selected' : 'Select'}
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       ) : (
@@ -294,13 +285,14 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
           </label>
         </div>
 
-        {/* Primary: Copy & Open */}
+        {/* Primary: Approve for extension execution */}
         <button
           className="queue-btn-primary"
-          onClick={handleCopyAndOpen}
-          style={{ background: platformColor, color: '#fff' }}
+          onClick={handleApproveClick}
+          disabled={!selectedComment}
+          style={{ background: selectedComment ? platformColor : '#cbd5e1', color: '#fff' }}
         >
-          {copied ? `✅ ${L.copied}` : `💬 ${L.copyComment}`}
+          {copied ? `✅ ${L.copied}` : `✓ ${L.copyComment}`}
         </button>
 
         {/* Secondary actions row */}

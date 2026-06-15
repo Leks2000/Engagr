@@ -412,27 +412,7 @@ export default function Queue({ userId, language = 'en' }) {
         })}
       </div>
 
-      {/* Bulk actions — only for review tab */}
-      {tab === 'review' && activeList.length > 1 && (
-        <div className="flex gap-2 mb-4">
-          <button
-            className="btn btn-sm flex-1"
-            style={{ background: '#f0fdf4', color: '#15803d', borderColor: '#bbf7d0' }}
-            onClick={handleApproveAll}
-            disabled={bulkLoading}
-          >
-            {t.approveAll}
-          </button>
-          <button
-            className="btn btn-sm flex-1"
-            style={{ background: '#fff5f5', color: '#dc2626', borderColor: '#fecaca' }}
-            onClick={handleSkipAll}
-            disabled={bulkLoading}
-          >
-            {t.skipAll}
-          </button>
-        </div>
-      )}
+      {/* Bulk approve is intentionally hidden: every publish action must be individually reviewed, variant-selected, and approved by the user. */}
 
       {/* Empty state */}
       {activeList.length === 0 ? (

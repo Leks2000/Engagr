@@ -5,14 +5,10 @@ import { SpeedInsights } from '@vercel/speed-insights/react'
 import './index.css'
 
 import Onboarding from './screens/Onboarding'
-import Dashboard from './screens/Dashboard'
-import LinkedInSettings from './screens/LinkedInSettings'
-import RedditSettings from './screens/RedditSettings'
+import Feed from './screens/Feed'
 import Queue from './screens/Queue'
-import ControlCenter from './screens/ControlCenter'
+import Settings from './screens/Settings'
 import UserMemory from './screens/UserMemory'
-import IdeasEngine from './screens/IdeasEngine'
-import XSettings from './screens/XSettings'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -69,29 +65,28 @@ export const api = {
 
 export const translations = {
   en: {
-    dashboard: 'Dashboard', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Queue', more: 'More',
+    feed: 'Feed', queue: 'Queue', settings: 'Settings', profile: 'Profile',
     loading: 'Loading...', appName: 'Engagr',
   },
   ru: {
-    dashboard: 'Главная', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Очередь', more: 'Ещё',
+    feed: 'Feed', queue: 'Очередь', settings: 'Настройки', profile: 'Профиль',
     loading: 'Загрузка...', appName: 'Engagr',
   },
   es: {
-    dashboard: 'Panel', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Cola', more: 'Más',
+    feed: 'Feed', queue: 'Cola', settings: 'Ajustes', profile: 'Perfil',
     loading: 'Cargando...', appName: 'Engagr',
   },
   de: {
-    dashboard: 'Übersicht', linkedin: 'LinkedIn', reddit: 'Reddit', queue: 'Warteschlange', more: 'Mehr',
+    feed: 'Feed', queue: 'Warteschlange', settings: 'Einstellungen', profile: 'Profil',
     loading: 'Laden...', appName: 'Engagr',
   },
 }
 
 const NAV_ITEMS = [
-  { id: 'dashboard', labelKey: 'dashboard', icon: DashboardIcon },
-  { id: 'linkedin', labelKey: 'linkedin', icon: LinkedInIcon },
-  { id: 'reddit', labelKey: 'reddit', icon: RedditIcon },
+  { id: 'feed', labelKey: 'feed', icon: FeedIcon },
   { id: 'queue', labelKey: 'queue', icon: QueueIcon },
-  { id: 'more', labelKey: 'more', icon: MoreIcon },
+  { id: 'settings', labelKey: 'settings', icon: SettingsIcon },
+  { id: 'profile', labelKey: 'profile', icon: ProfileIcon },
 ]
 
 // ── Extension bridge state (shared across screens) ──────────────────────
@@ -103,7 +98,6 @@ export const ExtensionContext = {
 function App() {
   const [screen, setScreen] = useState('loading')
   const [settings, setSettings] = useState(null)
-  const [extensionPresent, setExtensionPresent] = useState(false)
   // Language: from settings or auto-detected from Telegram
   const language = settings?.language || detectedLanguage
   const t = useMemo(() => translations[language] || translations.en, [language])
@@ -135,7 +129,7 @@ function App() {
         data.language = detectedLanguage
       }
       setSettings(data)
-      setScreen(data?.onboarding_completed ? 'dashboard' : 'onboarding')
+      setScreen(data?.onboarding_completed ? 'feed' : 'onboarding')
     } catch (err) {
       console.error('Failed to load settings:', err)
       setScreen('onboarding')
@@ -162,7 +156,6 @@ function App() {
       if (data.source !== 'ENGAGR_EXTENSION') return
 
       if (data.type === 'ENGAGR_BRIDGE_READY') {
-        setExtensionPresent(true)
         ExtensionContext.isPresent = true
         // Re-fire context immediately so extension gets userId right after READY
         if (settings) {
@@ -217,13 +210,15 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('linkedin') === 'connected') {
       window.history.replaceState({}, '', '/')
-      loadSettings().then(() => setScreen('linkedin'))
+      loadSettings().then(() => setScreen('settings'))
     }
-    // Deep link: ?screen=queue opens Queue tab directly
+    // Deep link: ?screen=feed|queue|settings|profile opens the target tab directly.
     const screenParam = params.get('screen')
-    if (screenParam && ['dashboard', 'queue', 'linkedin', 'reddit', 'more', 'memory', 'ideas', 'x'].includes(screenParam)) {
+    const legacyMap = { dashboard: 'feed', linkedin: 'settings', reddit: 'settings', more: 'settings', memory: 'profile', ideas: 'settings', x: 'settings' }
+    const mappedScreen = legacyMap[screenParam] || screenParam
+    if (mappedScreen && ['feed', 'queue', 'settings', 'profile'].includes(mappedScreen)) {
       window.history.replaceState({}, '', '/')
-      setScreen(screenParam)
+      setScreen(mappedScreen)
     }
   }, [])
 
@@ -257,14 +252,10 @@ function App() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
-            {screen === 'dashboard' && <div className="page-transition"><Dashboard userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} language={language} extensionPresent={extensionPresent} /></div>}
-            {screen === 'linkedin' && <div className="page-transition"><LinkedInSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
-            {screen === 'reddit' && <div className="page-transition"><RedditSettings userId={userId} settings={settings} onSettingsUpdate={handleSettingsUpdate} /></div>}
+            {screen === 'feed' && <div className="page-transition"><Feed userId={userId} language={language} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
-            {screen === 'memory' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
-            {screen === 'ideas' && <div className="page-transition"><IdeasEngine userId={userId} language={language} /></div>}
-            {screen === 'x' && <div className="page-transition"><XSettings language={language} /></div>}
-            {screen === 'more' && <div className="page-transition"><ControlCenter userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
+            {screen === 'settings' && <div className="page-transition"><Settings userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
+            {screen === 'profile' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
           </motion.div>
         </AnimatePresence>
       </main>
@@ -288,11 +279,10 @@ function App() {
 }
 
 const base = { fill: 'none', stroke: 'currentColor', strokeWidth: '1.75', strokeLinecap: 'round', strokeLinejoin: 'round' }
-function DashboardIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-5"/></svg> }
-function LinkedInIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><path d="M2 9h4v12H2z"/><circle cx="4" cy="4" r="2"/></svg> }
-function RedditIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M8 17c2.667 1 5.333 1 8 0"/><path d="M5 12c0-3 3-5 7-5s7 2 7 5-3 6-7 6-7-3-7-6Z"/><path d="M15 7l1-4 3 1"/><circle cx="19" cy="10" r="1"/><circle cx="5" cy="10" r="1"/></svg> }
+function FeedIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h10"/><circle cx="18" cy="19" r="2"/></svg> }
 function QueueIcon() { return <svg viewBox="0 0 24 24" {...base}><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M9 12h6"/><path d="M9 16h6"/></svg> }
-function MoreIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg> }
+function SettingsIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.4 1.1V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.31.36.58.64.76.28.18.61.27.96.24H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15Z"/></svg> }
+function ProfileIcon() { return <svg viewBox="0 0 24 24" {...base}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> }
 
 export default App
 export { userId }

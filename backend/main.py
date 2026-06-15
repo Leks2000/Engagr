@@ -23,7 +23,7 @@ from telegram import BotCommand
 # Add backend dir to path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import TELEGRAM_BOT_TOKEN, APP_ENV, DATA_DIR
+from config import TELEGRAM_BOT_TOKEN, APP_ENV, DATA_DIR, DAILY_LIMITS
 import storage
 import scheduler as sched_module
 import telegram_bot
@@ -353,17 +353,35 @@ def update_task_status(task_id):
         if not user_id:
             return jsonify({"error": "user_id required"}), 400
 
-        new_status = body.get("status", "")
-        if new_status not in ("completed", "in_progress", "dismissed", "failed"):
-            return jsonify({"error": "Invalid status. Use: completed, in_progress, dismissed, failed"}), 400
+        raw_status = body.get("status", "")
+        status_map = {
+            "in_progress": "executing",
+            "completed": "published",
+            "dismissed": "skipped",
+        }
+        new_status = status_map.get(raw_status, raw_status)
+        allowed_statuses = {"approved", "executing", "published", "failed", "skipped"}
+        if new_status not in allowed_statuses:
+            return jsonify({"error": "Invalid status. Use: approved, executing, published, failed, skipped"}), 400
 
-        # Update the queue item
+        item = storage.get_queue_item(user_id, task_id)
+        if not item:
+            return jsonify({"error": "Task not found"}), 404
+
+        # Update the queue item without removing it so Feed keeps lifecycle history.
         updates = {
             "status": new_status,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if new_status == "completed":
-            updates["completed_at"] = datetime.now(timezone.utc).isoformat()
+        if new_status == "executing":
+            updates["executing_at"] = datetime.now(timezone.utc).isoformat()
+        if new_status == "published":
+            updates["published_at"] = datetime.now(timezone.utc).isoformat()
+        if new_status == "failed":
+            updates["failed_at"] = datetime.now(timezone.utc).isoformat()
+            updates["execution_error"] = body.get("error", "")
+        if new_status == "skipped":
+            updates["skipped_at"] = datetime.now(timezone.utc).isoformat()
 
         storage.update_queue_item(user_id, task_id, updates)
 
@@ -638,8 +656,12 @@ def extension_linkedin_action_complete(user_id, item_id):
         except Exception as e:
             logger.error("Failed to record extension interaction: %s", e)
 
-        storage.remove_from_queue(user_id, item_id)
-        return jsonify({"status": "completed", "action": action})
+        storage.update_queue_item(user_id, item_id, {
+            "status": "published",
+            "published_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return jsonify({"status": "published", "action": action})
     except Exception as e:
         logger.error("Extension LinkedIn action complete failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500
@@ -707,8 +729,13 @@ def extension_execution_status():
             except Exception as e:
                 logger.error("Failed to record interaction: %s", e)
 
-        # Remove from queue
-        storage.remove_from_queue(user_id, item_id)
+        # Keep item in queue history for Feed status visibility.
+        storage.update_queue_item(user_id, item_id, {
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "published_at" if status == "published" else "failed_at": datetime.now(timezone.utc).isoformat(),
+            "execution_error": error_msg if status == "failed" else "",
+        })
 
         return jsonify({"ok": True, "status": status})
     except Exception as e:
@@ -724,8 +751,12 @@ def extension_linkedin_action_dismiss(user_id, item_id):
         if not item:
             return jsonify({"error": "Item not found"}), 404
 
-        storage.remove_from_queue(user_id, item_id)
-        return jsonify({"status": "dismissed"})
+        storage.update_queue_item(user_id, item_id, {
+            "status": "skipped",
+            "skipped_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return jsonify({"status": "skipped"})
     except Exception as e:
         logger.error("Extension LinkedIn action dismiss failed user=%s err=%s", user_id, e)
         return jsonify({"error": str(e)}), 500
@@ -1030,7 +1061,8 @@ def approve_item(user_id, item_id):
 
         # Primary action (comment/reply)
         if action in ("comment", "reply"):
-            action_chain.append({"type": "comment", "comment": item.get("selected_comment") or item.get("comment", "")})
+            browser_action = "reply" if platform == "x" else "comment"
+            action_chain.append({"type": browser_action, "comment": item.get("selected_comment") or item.get("comment", "")})
 
         # Like action (Phase 2)
         if do_like:
@@ -1073,7 +1105,14 @@ def approve_item(user_id, item_id):
 @api.route("/api/queue/<user_id>/<item_id>/skip", methods=["POST"])
 def skip_item(user_id, item_id):
     try:
-        storage.remove_from_queue(user_id, item_id)
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+        storage.update_queue_item(user_id, item_id, {
+            "status": "skipped",
+            "skipped_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
         return jsonify({"status": "skipped"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

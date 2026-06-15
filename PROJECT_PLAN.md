@@ -244,3 +244,64 @@ Phases 0 and 1 are blockers. Phase 3 can partially overlap with Phase 1.
 4. Keep LinkedIn / X / Reddit tabs open for auto-scan (every 15 min)
 
 See [README.md](README.md) for full install and deploy instructions.
+
+---
+
+## Current Roadmap After Feed Iteration (2026-06-15)
+
+This roadmap reflects the actual code state after the Mini App was refocused on the core approval loop. It supersedes older feature-first plans until the loop below is stable in production:
+
+```text
+Post found
+↓
+Shown in unified Feed
+↓
+Generated variants shown to user
+↓
+User selects one variant
+↓
+User presses Approve
+↓
+Extension executes approved action
+↓
+Feed status updates: approved → executing → published / failed
+```
+
+### Stage 1 — Required MVP loop
+
+- [x] Unified `Feed` screen for X, Reddit, and LinkedIn posts.
+- [x] Feed shows `platform`, `author`, `text`, `created_at`, and execution `status`.
+- [x] Supported visible statuses: `new_post`, `pending`, `approved`, `executing`, `published`, `failed`, `skipped`.
+- [x] Generated `comment_variants` are displayed as explicit Variant 1 / 2 / 3 options.
+- [x] Variant selection calls the existing `/select` endpoint and updates `selected_comment`.
+- [x] Approve is an explicit user action; card no longer approves via copy/open side effect.
+- [x] Backend keeps lifecycle status history instead of deleting published/skipped items from Feed.
+- [x] Extension status update path accepts `executing` and maps legacy statuses to the current lifecycle.
+- [ ] Production E2E verification with a real extension session: scan → Feed → select → approve → execute → published.
+
+### Stage 2 — Reddit execution and extension stability
+
+- Implement Reddit content-script actions for comment and upvote.
+- Validate Reddit parser on modern and old Reddit layouts.
+- Add extension execution retry/backoff and clearer per-task errors.
+- Keep all execution behind explicit Mini App approval.
+
+### Stage 3 — Filtering after the MVP loop is reliable
+
+- AI relevance score.
+- Smart filtering.
+- Anti-spam filters.
+- Minimum engagement threshold.
+
+### Stage 4 — Analytics after execution is reliable
+
+- User action metrics.
+- Published/failed conversion stats.
+- AI cost tracking.
+- Dashboard for action history and daily limits.
+
+### Deferred / legacy areas
+
+- `backend/queue_executor.py` remains legacy server-side execution and should not be used for LinkedIn/X publishing.
+- Ideas Engine stays under Settings → Advanced, not main navigation.
+- Dashboard/analytics screens are not part of the main navigation until Stage 4.
