@@ -1681,6 +1681,7 @@ def simulate_session(user_id):
                     "status": "pending",
                     "created_at": now,
                     "simulated": True,
+                    "_simulated": True,
                 })
                 queued += 1
             except Exception as e:

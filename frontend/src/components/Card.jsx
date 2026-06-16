@@ -29,7 +29,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
     executing: 'executing', published: 'published', failed: 'failed', skipped: 'skipped',
   }[item.status] || item.status || 'pending'
 
-  const isSimulated = item._simulated
+  const isSimulated = item._simulated || item.simulated
   const hasInteraction = item.has_previous_interaction
 
   const cardLabels = {
