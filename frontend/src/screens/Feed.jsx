@@ -45,12 +45,28 @@ export default function Feed({ userId, language = 'en' }) {
   const [expandedIds, setExpandedIds]   = useState(new Set())
   const loadingRef = useRef(loading)
   loadingRef.current = loading
+  // Track item IDs that are currently being mutated (generating/selecting/approving)
+  // so background polling does NOT overwrite their in-flight local state.
+  const pendingMutationsRef = useRef(new Set())
 
-  const loadFeed = useCallback(async () => {
+  const loadFeed = useCallback(async (force = false) => {
     if (!loadingRef.current) setRefreshing(true)
     try {
       const data = await api.get(`/api/queue/${userId}?status=all`)
-      setItems(Array.isArray(data) ? data : [])
+      if (Array.isArray(data)) {
+        setItems(current => {
+          // Merge: keep local in-flight state for items currently being mutated
+          const byId = Object.fromEntries(current.map(i => [i.id, i]))
+          return data.map(serverItem => {
+            const localItem = byId[serverItem.id]
+            // If this item is being mutated locally, keep local version
+            if (localItem && pendingMutationsRef.current.has(serverItem.id)) {
+              return localItem
+            }
+            return serverItem
+          })
+        })
+      }
       setLastUpdated(new Date())
     } catch (err) {
       console.error('Failed to load feed:', err)
@@ -62,7 +78,7 @@ export default function Feed({ userId, language = 'en' }) {
 
   useEffect(() => {
     loadFeed()
-    const interval = setInterval(loadFeed, 15000)
+    const interval = setInterval(() => loadFeed(), 15000)
     return () => clearInterval(interval)
   }, [loadFeed])
 
@@ -90,13 +106,17 @@ export default function Feed({ userId, language = 'en' }) {
   const handleGenerateReply = async (itemId) => {
     setGeneratingIds(prev => new Set(prev).add(itemId))
     setErrorById(prev => ({ ...prev, [itemId]: '' }))
+    // Lock this item against polling overwrites while mutation is in flight
+    pendingMutationsRef.current.add(itemId)
     try {
       const result = await api.post(`/api/queue/${userId}/${itemId}/regenerate`)
+      const variants = result.variants || []
+      const comment = result.comment || (variants.length > 0 ? variants[0] : '')
       patchItem(itemId, {
         status: 'pending',
-        comment: result.comment,
-        selected_comment: result.comment,
-        comment_variants: result.variants || [],
+        comment,
+        selected_comment: comment,
+        comment_variants: variants,
         post_language: result.post_language,
       })
       // Expand the card so user sees variants immediately
@@ -106,26 +126,40 @@ export default function Feed({ userId, language = 'en' }) {
       setErrorById(prev => ({ ...prev, [itemId]: err.message || 'AI generation failed. Try again.' }))
     } finally {
       setGeneratingIds(prev => { const n = new Set(prev); n.delete(itemId); return n })
+      // Release mutation lock after a short delay so UI renders before polling can overwrite
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
     }
   }
 
   // ── Select variant ────────────────────────────────────────
   const handleSelectVariant = async (itemId, variantIndex) => {
+    // Optimistic local update first — don't wait for server round-trip
+    setItems(current => current.map(item => {
+      if (item.id !== itemId) return item
+      const variants = item.comment_variants || []
+      const selected = variants[variantIndex] ?? item.selected_comment ?? item.comment ?? ''
+      return { ...item, comment: selected, selected_comment: selected }
+    }))
+    pendingMutationsRef.current.add(itemId)
     try {
       const result = await api.post(`/api/queue/${userId}/${itemId}/select`, { variant_index: variantIndex })
+      // Confirm with server response (comment_variants preserved from local state)
       patchItem(itemId, { comment: result.comment, selected_comment: result.comment })
     } catch (err) {
       console.error('Select variant failed:', err)
       setErrorById(prev => ({ ...prev, [itemId]: 'Failed to select variant.' }))
+    } finally {
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
     }
   }
 
   // ── Approve ───────────────────────────────────────────────
   const handleApprove = async (itemId, actions = {}) => {
+    pendingMutationsRef.current.add(itemId)
     try {
       const result = await api.post(`/api/queue/${userId}/${itemId}/approve`, actions)
       patchItem(itemId, {
-        status: 'approved',
+        status: result.status || 'approved',
         execution: result.execution || 'extension',
         action_chain: result.action_chain || [],
         approved_at: new Date().toISOString(),
@@ -135,6 +169,8 @@ export default function Feed({ userId, language = 'en' }) {
     } catch (err) {
       console.error('Approve failed:', err)
       setErrorById(prev => ({ ...prev, [itemId]: err.message || 'Approve failed' }))
+    } finally {
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
     }
   }
 
@@ -151,17 +187,23 @@ export default function Feed({ userId, language = 'en' }) {
 
   // ── Regenerate ────────────────────────────────────────────
   const handleRegenerate = async (itemId) => {
+    pendingMutationsRef.current.add(itemId)
     try {
       const result = await api.post(`/api/queue/${userId}/${itemId}/regenerate`)
+      const variants = result.variants || []
+      const comment = result.comment || (variants.length > 0 ? variants[0] : '')
       patchItem(itemId, {
         status: 'pending',
-        comment: result.comment,
-        selected_comment: result.comment,
-        comment_variants: result.variants || [],
+        comment,
+        selected_comment: comment,
+        comment_variants: variants,
+        post_language: result.post_language,
       })
     } catch (err) {
       console.error('Regenerate failed:', err)
       setErrorById(prev => ({ ...prev, [itemId]: 'Regenerate failed.' }))
+    } finally {
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
     }
   }
 
