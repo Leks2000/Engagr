@@ -576,6 +576,60 @@ async function detectActiveTab() {
   }
 }
 
+// ─── Push Generated Post to Queue ────────────────────────
+/**
+ * After AI reply/comment is generated locally in the popup,
+ * push the post + AI variants to the backend queue via
+ * POST /api/extension/posts/push so it appears in the Feed.
+ *
+ * This is the missing link that connects:
+ *   Popup AI generation → Backend queue → Feed UI
+ */
+async function pushGeneratedPostToQueue(settings, { author, post_text, post_url, platform, variants, selected_comment }) {
+  try {
+    const baseUrl = normalizeUrl(settings.apiBaseUrl)
+    const headers = { 'Content-Type': 'application/json' }
+
+    if (settings.jwtToken) {
+      headers['Authorization'] = `Bearer ${settings.jwtToken}`
+    }
+
+    const body = {
+      posts: [
+        {
+          author: author || 'Unknown',
+          post: post_text,
+          post_text: post_text,
+          url: post_url,
+          post_url: post_url,
+          platform: platform,
+          // Pass already-generated AI variants so backend skips re-generation
+          comment_variants: variants,
+          selected_comment: selected_comment,
+          comment: selected_comment,
+        },
+      ],
+      user_id: settings.telegramUserId || null,
+      scanned_at: new Date().toISOString(),
+    }
+
+    const resp = await fetch(`${baseUrl}/api/extension/posts/push`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      console.warn('[Engagr] pushGeneratedPostToQueue failed:', resp.status, err)
+    }
+  } catch (err) {
+    // Non-fatal — popup still shows the generated reply
+    console.warn('[Engagr] pushGeneratedPostToQueue error:', err.message)
+  }
+}
+
 // ─── AI Comment Generation ────────────────────────────────
 
 async function generateLinkedInComment(index) {
@@ -601,15 +655,27 @@ async function generateLinkedInComment(index) {
       }),
     })
 
+    const variants = data.variants || (data.comment ? [data.comment] : [])
+    const selected = data.selected_comment || data.comment || variants[0] || ''
+
     parsedLinkedInPosts[index] = {
       ...item,
-      aiComment: {
-        variants: data.variants || [data.comment],
-        selected_comment: data.selected_comment || data.comment || '',
-      },
+      aiComment: { variants, selected_comment: selected },
     }
     renderLinkedInPosts()
-    elements.parserStatus.textContent = 'AI comment generated.'
+    elements.parserStatus.textContent = 'AI comment generated. Saving to Feed...'
+
+    // Push post + AI variants to backend queue so it appears in Feed
+    await pushGeneratedPostToQueue(settings, {
+      author: item.author || '',
+      post_text: item.post || '',
+      post_url: item.url || '',
+      platform: 'linkedin',
+      variants,
+      selected_comment: selected,
+    })
+
+    elements.parserStatus.textContent = 'AI comment generated & saved to Feed.'
   } catch (err) {
     elements.parserStatus.textContent = err.message || 'Generation failed.'
   }
@@ -639,15 +705,27 @@ async function generateXReply(index) {
       }),
     })
 
+    const variants = data.variants || (data.selected_comment ? [data.selected_comment] : [])
+    const selected = data.selected_comment || variants[0] || ''
+
     parsedXTweets[index] = {
       ...item,
-      aiReply: {
-        variants: data.variants || [data.selected_comment],
-        selected_comment: data.selected_comment || data.variants?.[0] || '',
-      },
+      aiReply: { variants, selected_comment: selected },
     }
     renderXTweets()
-    elements.xStatus.textContent = 'AI reply generated.'
+    elements.xStatus.textContent = 'AI reply generated. Saving to Feed...'
+
+    // Push post + AI variants to backend queue so it appears in Feed
+    await pushGeneratedPostToQueue(settings, {
+      author: item.author || item.handle || '',
+      post_text: item.post || '',
+      post_url: item.url || '',
+      platform: 'x',
+      variants,
+      selected_comment: selected,
+    })
+
+    elements.xStatus.textContent = 'AI reply generated & saved to Feed.'
   } catch (err) {
     elements.xStatus.textContent = err.message || 'Generation failed.'
   }
@@ -678,15 +756,27 @@ async function generateRedditComment(index) {
       }),
     })
 
+    const variants = data.variants || (data.comment ? [data.comment] : [])
+    const selected = data.selected_comment || data.comment || variants[0] || ''
+
     parsedRedditPosts[index] = {
       ...item,
-      aiComment: {
-        variants: data.variants || [data.comment],
-        selected_comment: data.selected_comment || data.comment || '',
-      },
+      aiComment: { variants, selected_comment: selected },
     }
     renderRedditPosts()
-    elements.redditStatus.textContent = 'AI comment generated.'
+    elements.redditStatus.textContent = 'AI comment generated. Saving to Feed...'
+
+    // Push post + AI variants to backend queue so it appears in Feed
+    await pushGeneratedPostToQueue(settings, {
+      author: item.author || '',
+      post_text: item.post || item.title || '',
+      post_url: item.url || '',
+      platform: 'reddit',
+      variants,
+      selected_comment: selected,
+    })
+
+    elements.redditStatus.textContent = 'AI comment generated & saved to Feed.'
   } catch (err) {
     elements.redditStatus.textContent = err.message || 'Generation failed.'
   }
