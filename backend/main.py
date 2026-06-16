@@ -862,6 +862,31 @@ def extension_posts_push():
             # Deduplicate by URL or first 120 chars of text
             dedup_key = post_url or post_text[:120]
             if dedup_key in existing_keys:
+                # If the incoming post has pre-generated AI variants, update the
+                # existing queue item so the popup-generated reply is preserved.
+                pre_v = raw.get("comment_variants") or []
+                pre_s = (raw.get("selected_comment") or raw.get("comment") or "").strip()
+                if pre_v and pre_s:
+                    # Find the existing item and upgrade it with variants
+                    for existing_item in queue:
+                        existing_key = (
+                            existing_item.get("post_url")
+                            or existing_item.get("post_id")
+                            or existing_item.get("post_text", "")[:120]
+                        )
+                        if existing_key == dedup_key and existing_item.get("status") in ("new_post", "pending"):
+                            storage.update_queue_item(user_id, existing_item["id"], {
+                                "comment_variants": pre_v,
+                                "selected_comment": pre_s,
+                                "comment": pre_s,
+                                "status": "pending",
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                            })
+                            logger.info(
+                                "Updated existing queue item with pre-generated variants user=%s",
+                                user_id,
+                            )
+                            break
                 skipped += 1
                 continue
             existing_keys.add(dedup_key)
@@ -887,8 +912,22 @@ def extension_posts_push():
                 "scanned_at": body.get("scanned_at", ""),
             }
 
-            # ── 0.6 Auto-generate AI variants ────────────────
-            if auto_generate_ai:
+            # ── 0.6 Use pre-generated variants OR auto-generate AI variants ────
+            # If the extension already generated AI variants (e.g. popup "Generate Reply"),
+            # use them directly without re-generating. This is the key link that connects
+            # popup AI generation → queue → Feed UI.
+            pre_variants = raw.get("comment_variants") or []
+            pre_selected = (raw.get("selected_comment") or raw.get("comment") or "").strip()
+            if pre_variants and pre_selected:
+                item["comment_variants"] = pre_variants
+                item["selected_comment"] = pre_selected
+                item["comment"]          = pre_selected
+                item["status"]           = "pending"
+                logger.info(
+                    "Using pre-generated AI variants for %s post (user=%s)",
+                    platform, user_id,
+                )
+            elif auto_generate_ai:
                 try:
                     tone = (
                         ((settings.get(platform) or settings.get("linkedin") or {}).get("tone"))
