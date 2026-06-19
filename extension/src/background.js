@@ -13,6 +13,8 @@
  *  - AUTO EXECUTION: polls approved tasks and executes actions (Phase 1.3-1.5)
  */
 
+import { recorder } from './recorder.js'
+
 const DEFAULT_SETTINGS = {
   miniAppUrl: 'http://localhost:5173',
   apiBaseUrl: 'https://engagr-production.up.railway.app',
@@ -151,6 +153,7 @@ async function executeApprovedTasks(tasks) {
 
     if (!postUrl) {
       console.debug('[Engagr] Skipping task without post_url:', task.id)
+      recorder.recordStep({ taskId: task.id, platform, action: 'noop', step: 'skip', status: 'info', detail: 'no post_url' })
       continue
     }
 
@@ -158,9 +161,11 @@ async function executeApprovedTasks(tasks) {
     const actionChain = task.action_chain || [{ type: task.action || 'comment', comment: task.selected_comment || task.comment || '' }]
 
     console.log(`[Engagr] Executing task ${task.id}: ${platform} (${actionChain.length} actions)`)
+    recorder.recordStep({ taskId: task.id, platform, action: actionChain.map(a => a.type).join('+'), step: 'execution_start', status: 'start', detail: `${actionChain.length} action(s)` })
 
     // Mark as executing
     await updateTaskStatus(task.id, 'executing', baseUrl, jwtToken, telegramUserId)
+    recorder.recordStep({ taskId: task.id, platform, step: 'status_executing', status: 'info' })
 
     let allSucceeded = true
     let lastError = ''
@@ -203,15 +208,18 @@ async function executeApprovedTasks(tasks) {
           // Increment daily count on success
           incrementDailyCount(limitKey)
           console.log(`[Engagr] ${limitKey}: ${getDailyCount(limitKey)}/${DAILY_LIMITS[limitKey]}`)
+          recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_done`, status: 'success', detail: result.note || 'ok' })
         } else {
           allSucceeded = false
           lastError = result?.error || 'Action failed'
           console.warn(`[Engagr] Task ${task.id} step ${actionStep.type} failed:`, lastError)
+          recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_failed`, status: 'error', detail: lastError })
         }
       } catch (err) {
         allSucceeded = false
         lastError = err.message
         console.error(`[Engagr] Task ${task.id} step ${actionStep.type} error:`, err.message)
+        recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_error`, status: 'error', detail: err.message })
       }
 
       // Delay between actions in chain (30-180 seconds) - Phase 2.3
@@ -228,6 +236,7 @@ async function executeApprovedTasks(tasks) {
       // Clear retry state on success
       retryCounts.delete(task.id)
       console.log(`[Engagr] Task ${task.id} completed successfully`)
+      recorder.recordStep({ taskId: task.id, platform, step: 'published', status: 'success', detail: 'comment sent' })
     } else {
       const attempts = (retryCounts.get(task.id) || 0) + 1
       if (attempts <= MAX_RETRIES) {
@@ -246,6 +255,7 @@ async function executeApprovedTasks(tasks) {
         retryCounts.delete(task.id)
         await reportExecutionStatus(task, 'failed', baseUrl, jwtToken, telegramUserId, `${lastError} (max retries exhausted)`, attempts)
         console.warn(`[Engagr] Task ${task.id} failed permanently after ${attempts} attempts:`, lastError)
+        recorder.recordStep({ taskId: task.id, platform, step: 'failed_terminal', status: 'error', detail: `${lastError} (after ${attempts} attempts)` })
       }
     }
 
