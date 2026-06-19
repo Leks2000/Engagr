@@ -50,6 +50,51 @@ def _clean_comment(text: str) -> str:
     return text.strip()
 
 
+def _parse_numbered_lines(raw: str) -> list[str]:
+    """Parse '1. ...\\n2. ...' formatted text into a list of cleaned strings."""
+    out = []
+    for line in raw.split("\n"):
+        line = line.strip()
+        if line and line[0].isdigit() and "." in line[:3]:
+            out.append(_clean_comment(line.split(".", 1)[1].strip()))
+        elif line:
+            out.append(_clean_comment(line))
+    return out
+
+
+def translate_text(text: str, target_language: str) -> str | None:
+    """Translate arbitrary text to target_language (used for the post body).
+
+    Returns the translated string, or None on failure. Keeps the meaning and
+    natural tone of the original. Used so a user viewing the Mini App in RU can
+    read an EN post in Russian — while the *comment* itself is still posted in
+    the post's original language.
+    """
+    if not text or not target_language:
+        return None
+    try:
+        client = _get_client()
+        prompt = (
+            f"Translate the following social media post to {target_language}. "
+            f"Keep it natural and faithful to the original. "
+            f"Output ONLY the translation, nothing else:\n\n{text[:1500]}"
+        )
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a translator. Translate faithfully and concisely. Output only the translation."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=600,
+        )
+        tr = _clean_comment(resp.choices[0].message.content)
+        return tr or None
+    except Exception as e:
+        logger.warning(f"translate_text failed ({target_language}): {e}")
+        return None
+
+
 def generate_comment(post_text: str, platform: str = "linkedin", tone: str = "friendly", user_id: str = "") -> str:
     """
     Generate a single short, genuine comment for a social media post.
@@ -181,7 +226,9 @@ def generate_comment_variants(
 
         # Step 2: Generate translations if post language differs from user language
         translations = None
+        post_text_translated = None
         if post_language != user_language and user_language:
+            # Translate the comment variants (so the user reads them in their UI language)
             try:
                 translate_prompt = (
                     f"Translate these 3 comments to {user_language}. "
@@ -200,22 +247,19 @@ def generate_comment_variants(
                     max_tokens=200,
                 )
                 tr_raw = tr_response.choices[0].message.content.strip()
-                translations = []
-                for line in tr_raw.split("\n"):
-                    line = line.strip()
-                    if line and (line[0].isdigit() and "." in line[:3]):
-                        tr = line.split(".", 1)[1].strip()
-                        translations.append(_clean_comment(tr))
-                    elif line:
-                        translations.append(_clean_comment(line))
-                translations = translations[:3] if translations else None
+                translations = _parse_numbered_lines(tr_raw)[:3] or None
             except Exception as e:
                 logger.warning(f"Translation failed: {e}")
+
+            # Translate the POST BODY too (so the user reads the post in their UI
+            # language). The original-language comment is still what gets posted.
+            post_text_translated = translate_text(post_text, user_language)
 
         return {
             "variants": variants,
             "post_language": post_language,
             "translations": translations,
+            "post_text_translated": post_text_translated,
         }
 
     except Exception as e:
@@ -223,9 +267,9 @@ def generate_comment_variants(
         # Fallback: try single comment generation
         try:
             single = generate_comment(post_text, platform, tone=tone)
-            return {"variants": [single, single, single], "post_language": "en", "translations": None}
+            return {"variants": [single, single, single], "post_language": "en", "translations": None, "post_text_translated": None}
         except Exception:
-            return {"variants": ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."], "post_language": "en", "translations": None}
+            return {"variants": ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."], "post_language": "en", "translations": None, "post_text_translated": None}
 
 
 def regenerate_comment(post_text: str, previous_comment: str, platform: str = "linkedin", tone: str = "friendly", user_id: str = "") -> str:
