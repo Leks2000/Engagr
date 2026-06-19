@@ -1,6 +1,6 @@
 # Engagr — Project Plan (Source of Truth)
 
-> **Last updated:** 2026-06-12  
+> **Last updated:** 2026-06-19  
 > **Status:** Active development plan  
 > **For AI agents:** Read this file before implementing features. Phases are ordered — do not skip Phase 0–1 unless explicitly asked. Check off tasks in this file when completed.
 
@@ -279,26 +279,46 @@ Feed status updates: approved → executing → published / failed
 - [x] Extension status update path accepts `executing` and maps legacy statuses to the current lifecycle.
 - [ ] Production E2E verification with a real extension session: scan → Feed → select → approve → execute → published.
 
-### Stage 2 — Reddit execution and extension stability
+### Stage 2 — Reddit execution and extension stability ✅ (2026-06-19)
 
-- Implement Reddit content-script actions for comment and upvote.
-- Validate Reddit parser on modern and old Reddit layouts.
-- Add extension execution retry/backoff and clearer per-task errors.
-- Keep all execution behind explicit Mini App approval.
+- [x] Reddit content-script actions implemented (`reddit_actions.js`: comment prepare/submit + upvote, new + old Reddit).
+- [x] Reddit actions wired into `background.js` via the message protocol and registered in `manifest.json`.
+- [x] Reddit parser supports modern (shreddit) and old Reddit layouts.
+- [x] Extension execution retry/backoff added (up to 2 retries with 1min/3min backoff, then terminal `failed`).
+- [x] Double-execution race fixed: in-memory `inFlightTasks` set replaces the broken `task.execution === 'executing'` guard.
+- [x] `retry_count` surfaced through the execution-status endpoint and persisted on the queue item.
+- [x] All execution stays behind explicit Mini App approval.
 
-### Stage 3 — Filtering after the MVP loop is reliable
+### Stage 2.1 — Approval lifecycle & observability ✅ (2026-06-19)
 
-- AI relevance score.
-- Smart filtering.
-- Anti-spam filters.
+- [x] **Decline** action added (distinct from neutral **Skip**): backend `/decline` endpoint + `declined` lifecycle status + Feed badge + Decline buttons in `Card`, `NewPostCard`, and `StatusPostCard`.
+- [x] **Retry** button for failed items: backend `/retry` endpoint resets `failed → approved` and increments `retry_count` (capped at 5).
+- [x] Failed items now show `failed_at`, `execution_error`, and `retry_count` in the expanded card.
+- [x] **Browser Recorder** (`recorder.js`): every execution step is logged to `chrome.storage.local` (`execution_start → status_executing → step_done/failed → published/failed_terminal`) so any bug can be traced in under a minute. Popup can read/clear the log via `ENGAGR_GET_ACTION_LOG` / `ENGAGR_CLEAR_ACTION_LOG`.
+- [x] Dead code removed: `_post_item_delayed` (backend) and unused bulk handlers (`handleApproveAll`/`handleSkipAll`) + `approveAll`/`skipAll` i18n keys (Queue/Dashboard).
+
+### Stage 3 — Filtering after the MVP loop is reliable (deferred — after stability)
+
+- AI relevance score 0–10 before showing a post.
+- Smart filtering / anti-spam / duplicate detection.
 - Minimum engagement threshold.
+- Sort queue by importance.
 
-### Stage 4 — Analytics after execution is reliable
+> **Dependency:** only start once the LinkedIn + X + Reddit execution loop is confirmed stable end-to-end in production. The MVP loop (Stage 1 + 2) must hold first.
 
-- User action metrics.
+### Stage 4 — Analytics after execution is reliable (deferred)
+
+- Real Dashboard (not stub): today's funnel — *N found → M published → K declined/failed → CTR → AI cost → action history*.
 - Published/failed conversion stats.
-- AI cost tracking.
-- Dashboard for action history and daily limits.
+- AI cost tracking per action.
+
+> The current `Dashboard.jsx` shows live session logs, warm-up mode, analytics charts, and stat cards, but the full funnel (declined/skipped counts, CTR, AI cost) is Stage 4 work.
+
+### Stage 5 — Automated testing & self-healing (deferred — after stability)
+
+- Connect **Browser MCP / Playwright** so the AI can auto-test after each change: start the app → open LinkedIn/X/Reddit → exercise the Feed (approve/decline/retry) → click buttons → collect a bug report.
+- Record-selector self-healing: when a platform changes a button, the harness detects the breakage, searches for the new selector, and proposes/saves an update.
+- This stage is explicitly **after the loop is stable** so we don't spend resources on tests for a moving target.
 
 ### Deferred / legacy areas
 
