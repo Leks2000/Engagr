@@ -62,6 +62,43 @@ def _parse_numbered_lines(raw: str) -> list[str]:
     return out
 
 
+def translate_variants(variants: list[str], target_language: str) -> list[str] | None:
+    """Translate a list of comment variants to target_language in one batch call.
+
+    Returns a list aligned with `variants` (same length) or None on failure.
+    Used for on-demand re-translation when the user switches their UI language.
+    """
+    if not variants or not target_language:
+        return None
+    try:
+        client = _get_client()
+        numbered = "\n".join(f"{i + 1}. {v}" for i, v in enumerate(variants))
+        prompt = (
+            f"Translate these {len(variants)} short comments to {target_language}. "
+            f"Keep them short (3-20 words). Output only the translations, numbered:\n{numbered}"
+        )
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a translator. Translate concisely. Output only numbered translations."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=300,
+        )
+        raw = resp.choices[0].message.content.strip()
+        out = _parse_numbered_lines(raw)
+        # Align length with input (pad/trim)
+        if not out:
+            return None
+        while len(out) < len(variants):
+            out.append(out[-1])
+        return out[:len(variants)]
+    except Exception as e:
+        logger.warning(f"translate_variants failed ({target_language}): {e}")
+        return None
+
+
 def translate_text(text: str, target_language: str) -> str | None:
     """Translate arbitrary text to target_language (used for the post body).
 

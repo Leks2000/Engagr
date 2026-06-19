@@ -119,6 +119,8 @@ export default function Feed({ userId, language = 'en' }) {
         selected_comment: comment,
         comment_variants: variants,
         post_language: result.post_language,
+        translations: result.translations ?? null,
+        post_text_translated: result.post_text_translated ?? null,
       })
       // Expand the card so user sees variants immediately
       setExpandedIds(prev => new Set(prev).add(itemId))
@@ -234,6 +236,8 @@ export default function Feed({ userId, language = 'en' }) {
         selected_comment: comment,
         comment_variants: variants,
         post_language: result.post_language,
+        translations: result.translations ?? null,
+        post_text_translated: result.post_text_translated ?? null,
       })
     } catch (err) {
       console.error('Regenerate failed:', err)

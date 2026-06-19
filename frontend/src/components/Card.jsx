@@ -7,6 +7,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
   const [inviteCopied, setInviteCopied] = useState(false)
   const [doLike, setDoLike] = useState(false)
   const [doConnect, setDoConnect] = useState(false)
+  const [showOriginal, setShowOriginal] = useState(false)
 
   const isLinkedIn = item.platform === 'linkedin'
   const isX = item.platform === 'x' || item.platform === 'twitter'
@@ -39,6 +40,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
       copyComment: 'Approve', copied: 'Approved!', like: 'Like', invite: 'Invite',
       inviteTitle: 'Connection Invite', inviteCopy: 'Copy Invite', inviteCopied: 'Copied!',
       humanScore: 'Human', interactionHint: 'Previous contact',
+      translation: 'Translation', showOriginal: 'Show original', hideOriginal: 'Hide original',
     },
     ru: {
       originalPost: 'Исходный пост', aiVariants: 'Варианты AI-комментариев', viewPost: 'Открыть',
@@ -46,6 +48,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
       copyComment: 'Approve', copied: 'Одобрено!', like: 'Лайк', invite: 'Инвайт',
       inviteTitle: 'Заявка в друзья', inviteCopy: 'Копировать', inviteCopied: 'Скопировано!',
       humanScore: 'Человек', interactionHint: 'Уже общались',
+      translation: 'Перевод', showOriginal: 'Показать оригинал', hideOriginal: 'Скрыть оригинал',
     },
     es: {
       originalPost: 'Post original', aiVariants: 'Variantes de IA', viewPost: 'Ver',
@@ -53,6 +56,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
       copyComment: 'Aprobar', copied: 'Aprobado!', like: 'Me gusta', invite: 'Invitar',
       inviteTitle: 'Solicitud de conexion', inviteCopy: 'Copiar', inviteCopied: 'Copiado!',
       humanScore: 'Humano', interactionHint: 'Contacto previo',
+      translation: 'Traduccion', showOriginal: 'Mostrar original', hideOriginal: 'Ocultar original',
     },
     de: {
       originalPost: 'Originalpost', aiVariants: 'KI-Kommentare', viewPost: 'Offnen',
@@ -60,6 +64,7 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
       copyComment: 'Freigeben', copied: 'Freigegeben!', like: 'Gefallt mir', invite: 'Einladen',
       inviteTitle: 'Verbindungsanfrage', inviteCopy: 'Kopieren', inviteCopied: 'Kopiert!',
       humanScore: 'Mensch', interactionHint: 'Fruherer Kontakt',
+      translation: 'Ubersetzung', showOriginal: 'Original zeigen', hideOriginal: 'Original verbergen',
     },
   }
   const L = cardLabels[language] || cardLabels.en
@@ -188,10 +193,26 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
 
       {/* Post Excerpt */}
       <div className="queue-card-excerpt">
-        <p style={{ fontWeight: 600, marginBottom: 6 }}>Original post context</p>
+        <div className="flex items-center justify-between mb-1.5">
+          <p style={{ fontWeight: 600, marginBottom: 0 }}>Original post context</p>
+          {item.post_text_translated && item.post_language && item.user_language && item.post_language !== item.user_language && (
+            <button
+              className="text-[10px] font-semibold"
+              style={{ color: platformColor, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              onClick={() => setShowOriginal(v => !v)}
+            >
+              {showOriginal ? L.hideOriginal : `${L.translation} (${item.user_language.toUpperCase()})`}
+            </button>
+          )}
+        </div>
+        {/* When a translation exists and user hasn't asked for the original,
+            show the translated post body so the user reads it in their UI
+            language. The original is one tap away. */}
         {item.post_text && (
           <p style={{ marginBottom: 8, opacity: 0.9 }}>
-            {item.post_text.length > 280 ? `${item.post_text.slice(0, 280)}…` : item.post_text}
+            {(item.post_text_translated && !showOriginal)
+              ? (item.post_text_translated.length > 320 ? `${item.post_text_translated.slice(0, 320)}…` : item.post_text_translated)
+              : (item.post_text.length > 280 ? `${item.post_text.slice(0, 280)}…` : item.post_text)}
           </p>
         )}
         <p>{item.post_excerpt || item.excerpt || ''}</p>
@@ -225,6 +246,14 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
                 <div className="flex-1">
                   <p className="text-[11px] font-semibold mb-1" style={{ color: platformColor }}>Variant {idx + 1}</p>
                   <span className="queue-card-variant-text">{variant}</span>
+                  {/* Translated variant shown beneath the original-language comment
+                      so the user understands what they are approving in their UI
+                      language. The original is still what gets posted. */}
+                  {item.translations && item.translations[idx] && item.translations[idx] !== variant && (
+                    <span className="queue-card-variant-translation" style={{ display: 'block', marginTop: 4, fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>
+                      ↳ {item.translations[idx]}
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
