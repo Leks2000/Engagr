@@ -595,6 +595,8 @@ def extension_linkedin_queue(user_id):
                 "comment_variants": variants or [selected],
                 "post_language": ai_payload.get("post_language") or raw.get("post_language", "en"),
                 "user_language": user_language,
+                "translations": ai_payload.get("translations") or raw.get("translations"),
+                "post_text_translated": ai_payload.get("post_text_translated") or raw.get("post_text_translated"),
                 "status": "pending",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -916,6 +918,8 @@ def extension_posts_push():
                 "comment_variants": [],
                 "post_language": "en",
                 "user_language": user_language,
+                "translations": None,            # translated comment variants (UI language)
+                "post_text_translated": None,    # translated post body (UI language)
                 "status": "new_post",   # will be upgraded to pending after AI
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "scanned_at": body.get("scanned_at", ""),
@@ -952,11 +956,13 @@ def extension_posts_push():
                     )
                     variants = comment_data.get("variants") or []
                     if variants:
-                        item["comment_variants"] = variants
-                        item["selected_comment"] = variants[0]
-                        item["comment"]          = variants[0]
-                        item["post_language"]    = comment_data.get("post_language", "en")
-                        item["status"]           = "pending"
+                        item["comment_variants"]       = variants
+                        item["selected_comment"]       = variants[0]
+                        item["comment"]                = variants[0]
+                        item["post_language"]          = comment_data.get("post_language", "en")
+                        item["translations"]           = comment_data.get("translations")
+                        item["post_text_translated"]   = comment_data.get("post_text_translated")
+                        item["status"]                 = "pending"
                         logger.info(
                             "AI variants generated for %s post (user=%s platform=%s)",
                             platform, user_id, platform,
@@ -1280,11 +1286,15 @@ def regenerate_item(user_id, item_id):
             if not variants:
                 variants = ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."]
             selected = variants[0]
+            translations = comment_data.get("translations")
+            post_text_translated = comment_data.get("post_text_translated")
             storage.update_queue_item(user_id, item_id, {
                 "comment_variants": variants,
                 "selected_comment": selected,
                 "comment": selected,
                 "post_language": comment_data.get("post_language", "en"),
+                "translations": translations,
+                "post_text_translated": post_text_translated,
                 "status": "pending",
             })
             return jsonify({
@@ -1292,6 +1302,8 @@ def regenerate_item(user_id, item_id):
                 "comment": selected,
                 "variants": variants,
                 "post_language": comment_data.get("post_language", "en"),
+                "translations": translations,
+                "post_text_translated": post_text_translated,
             })
 
         # Regular regenerate for pending/approved items
