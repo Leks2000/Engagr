@@ -65,7 +65,8 @@
         "https://old.reddit.com/*"
       ],
       "js": [
-        "src/reddit_parser.js"
+        "src/reddit_parser.js",
+        "src/reddit_actions.js"
       ],
       "run_at": "document_idle"
     },
