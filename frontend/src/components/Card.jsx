@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, onSelectVariant, onGenerateInvite, language = 'en' }) {
+export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onRegenerate, onSelectVariant, onGenerateInvite, language = 'en' }) {
   const [copied, setCopied] = useState(false)
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteMsg, setInviteMsg] = useState(null)
@@ -35,28 +35,28 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
   const cardLabels = {
     en: {
       originalPost: 'Original Post', aiVariants: 'AI Comment Variants', viewPost: 'View post',
-      simTag: 'Simulated', post: 'Approve', edit: 'Edit', skip: 'Skip', regen: 'Regen',
+      simTag: 'Simulated', post: 'Approve', edit: 'Edit', skip: 'Skip', decline: 'Decline', regen: 'Regen',
       copyComment: 'Approve', copied: 'Approved!', like: 'Like', invite: 'Invite',
       inviteTitle: 'Connection Invite', inviteCopy: 'Copy Invite', inviteCopied: 'Copied!',
       humanScore: 'Human', interactionHint: 'Previous contact',
     },
     ru: {
       originalPost: 'Исходный пост', aiVariants: 'Варианты AI-комментариев', viewPost: 'Открыть',
-      simTag: 'Симуляция', post: 'Approve', edit: 'Изменить', skip: 'Пропустить', regen: 'Обновить',
+      simTag: 'Симуляция', post: 'Approve', edit: 'Изменить', skip: 'Пропустить', decline: 'Отклонить', regen: 'Обновить',
       copyComment: 'Approve', copied: 'Одобрено!', like: 'Лайк', invite: 'Инвайт',
       inviteTitle: 'Заявка в друзья', inviteCopy: 'Копировать', inviteCopied: 'Скопировано!',
       humanScore: 'Человек', interactionHint: 'Уже общались',
     },
     es: {
       originalPost: 'Post original', aiVariants: 'Variantes de IA', viewPost: 'Ver',
-      simTag: 'Simulado', post: 'Aprobar', edit: 'Editar', skip: 'Saltar', regen: 'Regenerar',
+      simTag: 'Simulado', post: 'Aprobar', edit: 'Editar', skip: 'Saltar', decline: 'Rechazar', regen: 'Regenerar',
       copyComment: 'Aprobar', copied: 'Aprobado!', like: 'Me gusta', invite: 'Invitar',
       inviteTitle: 'Solicitud de conexion', inviteCopy: 'Copiar', inviteCopied: 'Copiado!',
       humanScore: 'Humano', interactionHint: 'Contacto previo',
     },
     de: {
       originalPost: 'Originalpost', aiVariants: 'KI-Kommentare', viewPost: 'Offnen',
-      simTag: 'Simuliert', post: 'Freigeben', edit: 'Bearbeiten', skip: 'Uberspringen', regen: 'Neu',
+      simTag: 'Simuliert', post: 'Freigeben', edit: 'Bearbeiten', skip: 'Uberspringen', decline: 'Ablehnen', regen: 'Neu',
       copyComment: 'Freigeben', copied: 'Freigegeben!', like: 'Gefallt mir', invite: 'Einladen',
       inviteTitle: 'Verbindungsanfrage', inviteCopy: 'Kopieren', inviteCopied: 'Kopiert!',
       humanScore: 'Mensch', interactionHint: 'Fruherer Kontakt',
@@ -286,14 +286,26 @@ export default function Card({ item, onApprove, onEdit, onSkip, onRegenerate, on
         </div>
 
         {/* Primary: Approve for extension execution */}
-        <button
-          className="queue-btn-primary"
-          onClick={handleApproveClick}
-          disabled={!selectedComment}
-          style={{ background: selectedComment ? platformColor : '#cbd5e1', color: '#fff' }}
-        >
-          {copied ? `✅ ${L.copied}` : `✓ ${L.copyComment}`}
-        </button>
+        <div className="flex gap-2 mb-3">
+          <button
+            className="queue-btn-primary flex-1"
+            onClick={handleApproveClick}
+            disabled={!selectedComment}
+            style={{ background: selectedComment ? platformColor : '#cbd5e1', color: '#fff' }}
+          >
+            {copied ? `✅ ${L.copied}` : `✓ ${L.copyComment}`}
+          </button>
+          {onDecline && (
+            <button
+              className="queue-btn-secondary flex-shrink-0"
+              onClick={onDecline}
+              title="Decline (hard reject)"
+              style={{ color: '#be185d', borderColor: '#fbcfe8' }}
+            >
+              ✕ {L.decline}
+            </button>
+          )}
+        </div>
 
         {/* Secondary actions row */}
         <div className="queue-card-actions-row">
