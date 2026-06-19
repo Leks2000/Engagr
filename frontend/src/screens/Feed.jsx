@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../App'
 import Card from '../components/Card'
 
-const STATUSES = ['all', 'new_post', 'pending', 'approved', 'executing', 'published', 'failed', 'skipped']
+const STATUSES = ['all', 'new_post', 'pending', 'approved', 'executing', 'published', 'failed', 'declined', 'skipped']
 const PLATFORMS = ['all', 'x', 'reddit', 'linkedin']
 
 const STATUS_META = {
@@ -12,6 +12,7 @@ const STATUS_META = {
   executing: { label: 'Executing',       bg: '#ede9fe', color: '#6d28d9' },
   published: { label: 'Published',       bg: '#ecfdf5', color: '#047857' },
   failed:    { label: 'Failed',          bg: '#fee2e2', color: '#b91c1c' },
+  declined:  { label: 'Declined',        bg: '#fce7f3', color: '#be185d' },
   skipped:   { label: 'Skipped',         bg: '#f1f5f9', color: '#64748b' },
 }
 
@@ -185,6 +186,41 @@ export default function Feed({ userId, language = 'en' }) {
     }
   }
 
+  // ── Decline (hard reject — distinct from neutral skip) ────
+  const handleDecline = async (itemId) => {
+    pendingMutationsRef.current.add(itemId)
+    try {
+      await api.post(`/api/queue/${userId}/${itemId}/decline`)
+      patchItem(itemId, { status: 'declined', declined_at: new Date().toISOString() })
+      setExpandedIds(prev => { const n = new Set(prev); n.delete(itemId); return n })
+    } catch (err) {
+      console.error('Decline failed:', err)
+      setErrorById(prev => ({ ...prev, [itemId]: err.message || 'Decline failed' }))
+    } finally {
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
+    }
+  }
+
+  // ── Retry a failed item ───────────────────────────────────
+  const handleRetry = async (itemId) => {
+    pendingMutationsRef.current.add(itemId)
+    try {
+      const result = await api.post(`/api/queue/${userId}/${itemId}/retry`)
+      patchItem(itemId, {
+        status: 'approved',
+        retry_count: result.retry_count ?? 1,
+        execution_error: '',
+        updated_at: new Date().toISOString(),
+      })
+      setExpandedIds(prev => { const n = new Set(prev); n.delete(itemId); return n })
+    } catch (err) {
+      console.error('Retry failed:', err)
+      setErrorById(prev => ({ ...prev, [itemId]: err.message || 'Retry failed' }))
+    } finally {
+      setTimeout(() => pendingMutationsRef.current.delete(itemId), 3000)
+    }
+  }
+
   // ── Regenerate ────────────────────────────────────────────
   const handleRegenerate = async (itemId) => {
     pendingMutationsRef.current.add(itemId)
@@ -352,6 +388,7 @@ export default function Feed({ userId, language = 'en' }) {
                   isGenerating={generatingIds.has(item.id)}
                   onGenerate={() => handleGenerateReply(item.id)}
                   onSkip={() => handleSkip(item.id)}
+                  onDecline={() => handleDecline(item.id)}
                 />
 
               /* ── pending: show full Card with variants + Approve ─ */
@@ -365,17 +402,20 @@ export default function Feed({ userId, language = 'en' }) {
                     onApprove={actions  => handleApprove(item.id, actions)}
                     onEdit={() => handleEdit(item)}
                     onSkip={() => handleSkip(item.id)}
+                    onDecline={() => handleDecline(item.id)}
                     onRegenerate={() => handleRegenerate(item.id)}
                     onSelectVariant={handleSelectVariant}
                     language={language}
                   />
                 </>
 
-              /* ── approved / executing / published / failed / skipped ─ */
+              /* ── approved / executing / published / failed / declined / skipped ─ */
               ) : (
                 <StatusPostCard
                   item={item}
                   onSkip={item.status === 'failed' ? () => handleSkip(item.id) : undefined}
+                  onDecline={['failed', 'pending'].includes(item.status) ? () => handleDecline(item.id) : undefined}
+                  onRetry={item.status === 'failed' ? () => handleRetry(item.id) : undefined}
                   onRegenerate={item.status === 'failed' ? () => handleRegenerate(item.id) : undefined}
                   onExpand={() => setExpandedIds(prev => {
                     const n = new Set(prev)
@@ -406,7 +446,7 @@ function StatusBadge({ status }) {
 
 // ─── NewPostCard ─────────────────────────────────────────────────
 // Shown for status=new_post items — compact with "Generate variants" CTA
-function NewPostCard({ item, error, isGenerating, onGenerate, onSkip }) {
+function NewPostCard({ item, error, isGenerating, onGenerate, onSkip, onDecline }) {
   const color  = platformColor(item.platform)
   const author = item.author_name || item.author || 'Unknown'
   const text   = item.post_text || item.post_excerpt || item.excerpt || ''
@@ -428,7 +468,12 @@ function NewPostCard({ item, error, isGenerating, onGenerate, onSkip }) {
             </div>
           </div>
         </div>
-        <button className="text-xs text-gray-400 hover:text-red-400 px-2 py-1" onClick={onSkip}>✕</button>
+        <div className="flex items-center gap-1">
+          <button className="text-xs text-gray-400 hover:text-red-400 px-2 py-1" onClick={onSkip} title="Skip">✕</button>
+          {onDecline && (
+            <button className="text-xs px-2 py-1 rounded-lg" style={{ color: '#be185d', border: '1px solid #fbcfe8' }} onClick={onDecline} title="Decline">Decline</button>
+          )}
+        </div>
       </div>
 
       <div className="queue-card-excerpt mt-2">
@@ -469,9 +514,9 @@ function NewPostCard({ item, error, isGenerating, onGenerate, onSkip }) {
 }
 
 // ─── StatusPostCard ───────────────────────────────────────────────
-// Shown for approved / executing / published / failed / skipped items
+// Shown for approved / executing / published / failed / declined / skipped items
 // Compact by default; expands to show comment details
-function StatusPostCard({ item, onSkip, onRegenerate, onExpand, expanded }) {
+function StatusPostCard({ item, onSkip, onDecline, onRetry, onRegenerate, onExpand, expanded }) {
   const color  = platformColor(item.platform)
   const author = item.author_name || item.author || 'Unknown'
   const text   = item.post_text || item.post_excerpt || item.excerpt || ''
@@ -479,7 +524,7 @@ function StatusPostCard({ item, onSkip, onRegenerate, onExpand, expanded }) {
   const comment = item.selected_comment || item.comment || ''
 
   return (
-    <div className="queue-card" style={{ borderLeft: `4px solid ${color}`, opacity: item.status === 'skipped' ? 0.65 : 1 }}>
+    <div className="queue-card" style={{ borderLeft: `4px solid ${color}`, opacity: (item.status === 'skipped' || item.status === 'declined') ? 0.65 : 1 }}>
       <div className="queue-card-header">
         <div className="queue-card-author">
           <div className="queue-card-avatar" style={{ background: color }}>
@@ -528,17 +573,32 @@ function StatusPostCard({ item, onSkip, onRegenerate, onExpand, expanded }) {
           {/* Actions for failed items */}
           {item.status === 'failed' && (
             <div className="flex gap-2 mt-3">
-              {onRegenerate && (
-                <button className="btn btn-sm flex-1" onClick={onRegenerate}>🔄 Retry</button>
+              {onRetry && (
+                <button className="btn btn-sm flex-1" onClick={onRetry}>↻ Retry</button>
+              )}
+              {onRegenerate && !onRetry && (
+                <button className="btn btn-sm flex-1" onClick={onRegenerate}>🔄 Regenerate</button>
+              )}
+              {onDecline && (
+                <button className="btn btn-sm flex-1"
+                  style={{ color: '#be185d', borderColor: '#fbcfe8' }}
+                  onClick={onDecline}>
+                  ✕ Decline
+                </button>
               )}
               {onSkip && (
                 <button className="btn btn-sm flex-1"
                   style={{ color: 'var(--color-muted)', borderColor: '#ddd' }}
                   onClick={onSkip}>
-                  ✕ Dismiss
+                  Skip
                 </button>
               )}
             </div>
+          )}
+
+          {/* Declined items can be re-approved if needed */}
+          {item.status === 'declined' && onDecline === undefined && (
+            <p className="text-[10px] mt-2" style={{ color: '#94a3b8' }}>Declined — excluded from automation.</p>
           )}
 
           {/* Timestamps */}
@@ -551,6 +611,21 @@ function StatusPostCard({ item, onSkip, onRegenerate, onExpand, expanded }) {
             {item.published_at && (
               <p className="text-[10px]" style={{ color: '#94a3b8' }}>
                 Published: {formatDate(item.published_at)}
+              </p>
+            )}
+            {item.failed_at && (
+              <p className="text-[10px]" style={{ color: '#b91c1c' }}>
+                Failed: {formatDate(item.failed_at)}{item.execution_error ? ` — ${item.execution_error}` : ''}
+              </p>
+            )}
+            {item.declined_at && (
+              <p className="text-[10px]" style={{ color: '#be185d' }}>
+                Declined: {formatDate(item.declined_at)}
+              </p>
+            )}
+            {item.retry_count > 0 && (
+              <p className="text-[10px]" style={{ color: '#94a3b8' }}>
+                Retries: {item.retry_count}
               </p>
             )}
           </div>

@@ -358,11 +358,12 @@ def update_task_status(task_id):
             "in_progress": "executing",
             "completed": "published",
             "dismissed": "skipped",
+            "rejected": "declined",
         }
         new_status = status_map.get(raw_status, raw_status)
-        allowed_statuses = {"approved", "executing", "published", "failed", "skipped"}
+        allowed_statuses = {"approved", "executing", "published", "failed", "skipped", "declined"}
         if new_status not in allowed_statuses:
-            return jsonify({"error": "Invalid status. Use: approved, executing, published, failed, skipped"}), 400
+            return jsonify({"error": "Invalid status. Use: approved, executing, published, failed, skipped, declined"}), 400
 
         item = storage.get_queue_item(user_id, task_id)
         if not item:
@@ -382,6 +383,8 @@ def update_task_status(task_id):
             updates["execution_error"] = body.get("error", "")
         if new_status == "skipped":
             updates["skipped_at"] = datetime.now(timezone.utc).isoformat()
+        if new_status == "declined":
+            updates["declined_at"] = datetime.now(timezone.utc).isoformat()
 
         storage.update_queue_item(user_id, task_id, updates)
 
@@ -730,12 +733,18 @@ def extension_execution_status():
                 logger.error("Failed to record interaction: %s", e)
 
         # Keep item in queue history for Feed status visibility.
-        storage.update_queue_item(user_id, item_id, {
+        updates = {
             "status": status,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "published_at" if status == "published" else "failed_at": datetime.now(timezone.utc).isoformat(),
             "execution_error": error_msg if status == "failed" else "",
-        })
+        }
+        # Persist retry_count reported by the extension so the Feed can show
+        # how many attempts have been made on a failing task.
+        retry_count = body.get("retry_count")
+        if status == "failed" and retry_count is not None:
+            updates["retry_count"] = int(retry_count)
+        storage.update_queue_item(user_id, item_id, updates)
 
         return jsonify({"ok": True, "status": status})
     except Exception as e:
@@ -1141,6 +1150,59 @@ def skip_item(user_id, item_id):
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
         return jsonify({"status": "skipped"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/queue/<user_id>/<item_id>/decline", methods=["POST"])
+def decline_item(user_id, item_id):
+    """Decline an item — a hard reject (distinct from a neutral skip).
+
+    Sets status to 'declined' so it is excluded from the pending/approved
+    queues and surfaced in the Feed with its own badge for lifecycle audit.
+    """
+    try:
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+        storage.update_queue_item(user_id, item_id, {
+            "status": "declined",
+            "declined_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return jsonify({"status": "declined"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/queue/<user_id>/<item_id>/retry", methods=["POST"])
+def retry_item(user_id, item_id):
+    """Re-queue a failed item for another execution attempt.
+
+    Resets status to 'approved' (so the extension polls it again) and
+    increments retry_count. Caps manual retries to avoid runaway loops.
+    """
+    try:
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+
+        if item.get("status") != "failed":
+            return jsonify({"error": "Only failed items can be retried"}), 400
+
+        retry_count = int(item.get("retry_count", 0) or 0) + 1
+        MAX_RETRIES = 5
+        if retry_count > MAX_RETRIES:
+            return jsonify({"error": f"Max retries ({MAX_RETRIES}) exceeded"}), 400
+
+        storage.update_queue_item(user_id, item_id, {
+            "status": "approved",
+            "retry_count": retry_count,
+            "retry_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "execution_error": "",
+        })
+        return jsonify({"status": "approved", "retry_count": retry_count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2450,68 +2512,6 @@ def x_update_settings(user_id):
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ── Background Posting ────────────────────────────────
-
-async def _post_item_delayed(user_id: str, item: dict):
-    """Post an approved item after a random delay."""
-    import random
-    from config import DELAYS
-    import queue_executor
-
-    action = item.get("action", "comment")
-    delay_key = "like" if action in ("like", "upvote") else "comment"
-    delay = random.uniform(*DELAYS[delay_key])
-    logger.info("Posting item %s action=%s in %s sec", item["id"], action, int(delay))
-    await asyncio.sleep(delay)
-
-    success, _msg = await queue_executor.execute_queue_item(user_id, item)
-    storage.remove_from_queue(user_id, item["id"])
-
-    platform = item.get("platform", "")
-
-    if success:
-        try:
-            nested_replies.track_posted_comment(user_id, item)
-        except Exception as e:
-            logger.error("Failed to track posted comment: %s", e)
-
-        try:
-            interaction_memory.record_interaction(
-                user_id=user_id,
-                author_name=item.get("author_name", "") or item.get("author", ""),
-                author_profile_url=item.get("post_url", ""),
-                platform=platform,
-                interaction_type=item.get("action", "comment"),
-                post_url=item.get("post_url", ""),
-                our_message=item.get("comment", ""),
-            )
-        except Exception as e:
-            logger.error("Failed to record interaction: %s", e)
-
-        # Save activity record for analytics
-        try:
-            from datetime import datetime, timezone
-            stats = storage.get_stats(user_id)
-            smart_schedule.save_activity_record(user_id, {
-                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                "linkedin_comments": stats.get("linkedin_comments", 0),
-                "linkedin_likes": stats.get("linkedin_likes", 0),
-                "reddit_comments": stats.get("reddit_comments", 0),
-                "reddit_upvotes": stats.get("reddit_upvotes", 0),
-                "best_hour": datetime.now(timezone.utc).hour,
-                "engagement_score": 1,
-            })
-        except Exception as e:
-            logger.error("Failed to save activity record: %s", e)
-
-    # Notify user
-    try:
-        status_msg = "Comment posted successfully!" if success else "Failed to post comment."
-        await telegram_bot.send_queue_item_to_user(user_id, {"type": "error", "message": status_msg})
-    except Exception:
-        pass
 
 
 # ── Main ──────────────────────────────────────────────

@@ -13,6 +13,8 @@
  *  - AUTO EXECUTION: polls approved tasks and executes actions (Phase 1.3-1.5)
  */
 
+import { recorder } from './recorder.js'
+
 const DEFAULT_SETTINGS = {
   miniAppUrl: 'http://localhost:5173',
   apiBaseUrl: 'https://engagr-production.up.railway.app',
@@ -122,6 +124,20 @@ function checkDailyLimit(actionType) {
  * Supports action chains with delays between steps (Phase 2.3).
  * Enforces daily limits (Phase 2.4).
  */
+// ── Execution state (prevents double-execution across polls) ────
+// `task.execution` is a backend field set to "extension" (the executor), NOT a
+// running-state flag — so the old guard `task.execution === 'executing'` never
+// matched and the same approved task could be executed twice by overlapping
+// polls. We track in-flight IDs in memory instead.
+const inFlightTasks = new Set()
+
+// ── Retry with backoff ───────────────────────────────────────────
+// On a failed chain we wait an increasing delay, then reset the task to
+// "approved" so the next poll re-executes it. Caps at MAX_RETRIES.
+const MAX_RETRIES = 2
+const RETRY_BACKOFF_MS = [60000, 180000] // 1 min, 3 min
+const retryCounts = new Map()
+
 async function executeApprovedTasks(tasks) {
   const settings = await chrome.storage.sync.get(['apiBaseUrl', 'jwtToken', 'telegramUserId'])
   const { apiBaseUrl, jwtToken, telegramUserId } = settings
@@ -129,13 +145,15 @@ async function executeApprovedTasks(tasks) {
 
   for (const task of tasks) {
     if (task.status !== 'approved') continue
-    if (task.execution === 'executing') continue // already being processed
+    if (inFlightTasks.has(task.id)) continue // already being processed
+    inFlightTasks.add(task.id)
 
     const platform = task.platform || 'linkedin'
     const postUrl = task.post_url || ''
 
     if (!postUrl) {
       console.debug('[Engagr] Skipping task without post_url:', task.id)
+      recorder.recordStep({ taskId: task.id, platform, action: 'noop', step: 'skip', status: 'info', detail: 'no post_url' })
       continue
     }
 
@@ -143,9 +161,11 @@ async function executeApprovedTasks(tasks) {
     const actionChain = task.action_chain || [{ type: task.action || 'comment', comment: task.selected_comment || task.comment || '' }]
 
     console.log(`[Engagr] Executing task ${task.id}: ${platform} (${actionChain.length} actions)`)
+    recorder.recordStep({ taskId: task.id, platform, action: actionChain.map(a => a.type).join('+'), step: 'execution_start', status: 'start', detail: `${actionChain.length} action(s)` })
 
     // Mark as executing
     await updateTaskStatus(task.id, 'executing', baseUrl, jwtToken, telegramUserId)
+    recorder.recordStep({ taskId: task.id, platform, step: 'status_executing', status: 'info' })
 
     let allSucceeded = true
     let lastError = ''
@@ -188,15 +208,18 @@ async function executeApprovedTasks(tasks) {
           // Increment daily count on success
           incrementDailyCount(limitKey)
           console.log(`[Engagr] ${limitKey}: ${getDailyCount(limitKey)}/${DAILY_LIMITS[limitKey]}`)
+          recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_done`, status: 'success', detail: result.note || 'ok' })
         } else {
           allSucceeded = false
           lastError = result?.error || 'Action failed'
           console.warn(`[Engagr] Task ${task.id} step ${actionStep.type} failed:`, lastError)
+          recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_failed`, status: 'error', detail: lastError })
         }
       } catch (err) {
         allSucceeded = false
         lastError = err.message
         console.error(`[Engagr] Task ${task.id} step ${actionStep.type} error:`, err.message)
+        recorder.recordStep({ taskId: task.id, platform, action: actionStep.type, step: `step_${i + 1}_error`, status: 'error', detail: err.message })
       }
 
       // Delay between actions in chain (30-180 seconds) - Phase 2.3
@@ -210,16 +233,39 @@ async function executeApprovedTasks(tasks) {
     // Report final status
     if (allSucceeded) {
       await reportExecutionStatus(task, 'published', baseUrl, jwtToken, telegramUserId)
+      // Clear retry state on success
+      retryCounts.delete(task.id)
       console.log(`[Engagr] Task ${task.id} completed successfully`)
+      recorder.recordStep({ taskId: task.id, platform, step: 'published', status: 'success', detail: 'comment sent' })
     } else {
-      await reportExecutionStatus(task, 'failed', baseUrl, jwtToken, telegramUserId, lastError)
-      console.warn(`[Engagr] Task ${task.id} failed:`, lastError)
+      const attempts = (retryCounts.get(task.id) || 0) + 1
+      if (attempts <= MAX_RETRIES) {
+        retryCounts.set(task.id, attempts)
+        console.warn(`[Engagr] Task ${task.id} failed (attempt ${attempts}/${MAX_RETRIES + 1}): ${lastError} — retrying in ${RETRY_BACKOFF_MS[attempts - 1] / 1000}s`)
+        await reportExecutionStatus(task, 'failed', baseUrl, jwtToken, telegramUserId, `${lastError} (will retry ${attempts}/${MAX_RETRIES})`, attempts)
+        // Release the in-flight lock so the scheduled retry can run
+        inFlightTasks.delete(task.id)
+        // After backoff, reset to approved so the next poll re-executes it
+        setTimeout(async () => {
+          await updateTaskStatus(task.id, 'approved', baseUrl, jwtToken, telegramUserId)
+          console.log(`[Engagr] Task ${task.id} reset to approved for retry`)
+        }, RETRY_BACKOFF_MS[attempts - 1])
+      } else {
+        // Max retries exhausted — terminal failure
+        retryCounts.delete(task.id)
+        await reportExecutionStatus(task, 'failed', baseUrl, jwtToken, telegramUserId, `${lastError} (max retries exhausted)`, attempts)
+        console.warn(`[Engagr] Task ${task.id} failed permanently after ${attempts} attempts:`, lastError)
+        recorder.recordStep({ taskId: task.id, platform, step: 'failed_terminal', status: 'error', detail: `${lastError} (after ${attempts} attempts)` })
+      }
     }
 
     // Delay between tasks (30-180 seconds)
     const delay = 30000 + Math.random() * 150000
     console.log(`[Engagr] Waiting ${Math.round(delay / 1000)}s before next task`)
     await new Promise(r => setTimeout(r, delay))
+
+    // Release the in-flight lock for this task
+    inFlightTasks.delete(task.id)
   }
 }
 
@@ -351,21 +397,49 @@ async function executeRedditAction(actionStep, task) {
   const actionType = actionStep.type
 
   // Find or create Reddit tab
-  const tab = await findOrCreateTab(postUrl, ['https://www.reddit.com/*', 'https://reddit.com/*'])
+  const tab = await findOrCreateTab(postUrl, ['https://www.reddit.com/*', 'https://reddit.com/*', 'https://old.reddit.com/*'])
   if (!tab?.id) return { ok: false, error: 'Could not open Reddit tab' }
 
   // Wait for page to load
   await new Promise(r => setTimeout(r, 3000))
 
-  // Reddit actions - basic implementation
+  // Inject reddit_actions.js if not already present (content_script runs on
+  // document_idle, but navigating an existing tab via tabs.update does NOT
+  // re-inject content scripts, so we inject defensively).
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['src/reddit_actions.js'],
+    })
+    await new Promise(r => setTimeout(r, 500))
+  } catch (e) {
+    // Script might already be injected — continue anyway
+  }
+
   if (actionType === 'comment') {
-    // TODO: Implement Reddit auto-comment via content script
-    return { ok: false, error: 'Reddit auto-comment not yet implemented' }
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_PREPARE_REDDIT_COMMENT',
+      payload: { url: postUrl, comment: actionStep.comment || '' },
+    })
+
+    if (result?.ok) {
+      // Auto-submit
+      await new Promise(r => setTimeout(r, 1000))
+      const submitResult = await chrome.tabs.sendMessage(tab.id, {
+        type: 'ENGAGR_AUTO_SUBMIT_REDDIT_COMMENT',
+        payload: {},
+      })
+      return submitResult || result
+    }
+    return result || { ok: false, error: 'Reddit comment prepare returned no result' }
   }
 
   if (actionType === 'upvote') {
-    // TODO: Implement Reddit upvote via content script
-    return { ok: false, error: 'Reddit auto-upvote not yet implemented' }
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      type: 'ENGAGR_REDDIT_UPVOTE',
+      payload: { url: postUrl },
+    })
+    return result || { ok: false, error: 'Reddit upvote returned no result' }
   }
 
   return { ok: false, error: `Unknown Reddit action: ${actionType}` }
@@ -392,24 +466,29 @@ async function findOrCreateTab(url, urlPatterns) {
 /**
  * Report execution status to backend.
  */
-async function reportExecutionStatus(task, status, baseUrl, jwtToken, userId, error = '') {
+async function reportExecutionStatus(task, status, baseUrl, jwtToken, userId, error = '', retryCount = null) {
   try {
     const headers = { 'Content-Type': 'application/json' }
     if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`
 
+    const body = {
+      user_id: userId,
+      item_id: task.id,
+      status,
+      error,
+      platform: task.platform,
+      author: task.author || task.author_name,
+      post_url: task.post_url,
+      comment: task.selected_comment || task.comment,
+    }
+    if (status === 'failed' && retryCount !== null) {
+      body.retry_count = retryCount
+    }
+
     await fetch(`${baseUrl}/api/extension/execution/status`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        user_id: userId,
-        item_id: task.id,
-        status,
-        error,
-        platform: task.platform,
-        author: task.author || task.author_name,
-        post_url: task.post_url,
-        comment: task.selected_comment || task.comment,
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(10000),
     })
   } catch (err) {
