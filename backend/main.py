@@ -595,6 +595,8 @@ def extension_linkedin_queue(user_id):
                 "comment_variants": variants or [selected],
                 "post_language": ai_payload.get("post_language") or raw.get("post_language", "en"),
                 "user_language": user_language,
+                "translations": ai_payload.get("translations") or raw.get("translations"),
+                "post_text_translated": ai_payload.get("post_text_translated") or raw.get("post_text_translated"),
                 "status": "pending",
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -916,6 +918,8 @@ def extension_posts_push():
                 "comment_variants": [],
                 "post_language": "en",
                 "user_language": user_language,
+                "translations": None,            # translated comment variants (UI language)
+                "post_text_translated": None,    # translated post body (UI language)
                 "status": "new_post",   # will be upgraded to pending after AI
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "scanned_at": body.get("scanned_at", ""),
@@ -952,11 +956,13 @@ def extension_posts_push():
                     )
                     variants = comment_data.get("variants") or []
                     if variants:
-                        item["comment_variants"] = variants
-                        item["selected_comment"] = variants[0]
-                        item["comment"]          = variants[0]
-                        item["post_language"]    = comment_data.get("post_language", "en")
-                        item["status"]           = "pending"
+                        item["comment_variants"]       = variants
+                        item["selected_comment"]       = variants[0]
+                        item["comment"]                = variants[0]
+                        item["post_language"]          = comment_data.get("post_language", "en")
+                        item["translations"]           = comment_data.get("translations")
+                        item["post_text_translated"]   = comment_data.get("post_text_translated")
+                        item["status"]                 = "pending"
                         logger.info(
                             "AI variants generated for %s post (user=%s platform=%s)",
                             platform, user_id, platform,
@@ -1280,11 +1286,15 @@ def regenerate_item(user_id, item_id):
             if not variants:
                 variants = ["Great insight!", "Thanks for sharing this.", "Really valuable perspective."]
             selected = variants[0]
+            translations = comment_data.get("translations")
+            post_text_translated = comment_data.get("post_text_translated")
             storage.update_queue_item(user_id, item_id, {
                 "comment_variants": variants,
                 "selected_comment": selected,
                 "comment": selected,
                 "post_language": comment_data.get("post_language", "en"),
+                "translations": translations,
+                "post_text_translated": post_text_translated,
                 "status": "pending",
             })
             return jsonify({
@@ -1292,6 +1302,8 @@ def regenerate_item(user_id, item_id):
                 "comment": selected,
                 "variants": variants,
                 "post_language": comment_data.get("post_language", "en"),
+                "translations": translations,
+                "post_text_translated": post_text_translated,
             })
 
         # Regular regenerate for pending/approved items
@@ -1325,6 +1337,118 @@ def regenerate_item(user_id, item_id):
         })
     except Exception as e:
         logger.error("regenerate_item error user=%s item=%s: %s", user_id, item_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/queue/<user_id>/<item_id>/translate", methods=["POST"])
+def translate_item(user_id, item_id):
+    """On-demand translation of a queue item's post body + comment variants.
+
+    Triggered when the user switches their UI language. Regenerates the
+    `translations` (comment variants) and `post_text_translated` (post body)
+    for the *current* user language and persists them so the Mini App can
+    show the post + comments in the user's language. The original-language
+    comment (still posted as-is) is never mutated.
+
+    Body: { "language": "ru" }  (defaults to the user's saved language)
+    """
+    try:
+        import ai_comment
+
+        item = storage.get_queue_item(user_id, item_id)
+        if not item:
+            return jsonify({"error": "Item not found"}), 404
+
+        settings = storage.get_settings(user_id)
+        body = request.get_json(silent=True) or {}
+        user_language = (body.get("language") or settings.get("language") or "en").lower()[:5]
+        post_language = (item.get("post_language") or "en").lower()[:5]
+        post_text = item.get("post_text", "")
+        variants = item.get("comment_variants") or []
+
+        # Nothing to translate if languages already match
+        if post_language == user_language or not variants:
+            storage.update_queue_item(user_id, item_id, {
+                "translations": None,
+                "post_text_translated": None,
+                "user_language": user_language,
+            })
+            return jsonify({
+                "status": "noop",
+                "translations": None,
+                "post_text_translated": None,
+            })
+
+        translations = ai_comment.translate_variants(variants, user_language)
+        post_text_translated = ai_comment.translate_text(post_text, user_language)
+
+        storage.update_queue_item(user_id, item_id, {
+            "translations": translations,
+            "post_text_translated": post_text_translated,
+            "user_language": user_language,
+        })
+        return jsonify({
+            "status": "translated",
+            "translations": translations,
+            "post_text_translated": post_text_translated,
+        })
+    except Exception as e:
+        logger.error("translate_item error user=%s item=%s: %s", user_id, item_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/queue/<user_id>/translate-all", methods=["POST"])
+def translate_all_items(user_id):
+    """Translate all visible queue items for the current user language.
+
+    Called when the user switches language in the Mini App — re-translates
+    every item whose post language differs from the new UI language in one
+    request so the whole feed updates at once. Items are translated in
+    parallel via a thread pool to keep latency reasonable for large feeds.
+    """
+    try:
+        import ai_comment
+        from concurrent.futures import ThreadPoolExecutor
+
+        settings = storage.get_settings(user_id)
+        body = request.get_json(silent=True) or {}
+        user_language = (body.get("language") or settings.get("language") or "en").lower()[:5]
+        queue = storage.get_queue(user_id)
+
+        # Only items that need translation
+        candidates = [
+            q for q in queue
+            if q.get("post_language") and q.get("post_language").lower()[:5] != user_language
+            and (q.get("comment_variants") or [])
+        ]
+
+        def _do_one(it):
+            variants = it.get("comment_variants") or []
+            translations = ai_comment.translate_variants(variants, user_language)
+            post_text_translated = ai_comment.translate_text(it.get("post_text", ""), user_language)
+            storage.update_queue_item(user_id, it["id"], {
+                "translations": translations,
+                "post_text_translated": post_text_translated,
+                "user_language": user_language,
+            })
+            return it["id"]
+
+        if candidates:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(_do_one, candidates))
+        else:
+            # Still update user_language on items with matching languages
+            for q in queue:
+                if q.get("user_language") != user_language:
+                    storage.update_queue_item(user_id, q["id"], {
+                        "translations": None,
+                        "post_text_translated": None,
+                        "user_language": user_language,
+                    })
+
+        return jsonify({"status": "translated", "translated_count": len(candidates)})
+    except Exception as e:
+        logger.error("translate_all_items error user=%s: %s", user_id, e)
         return jsonify({"error": str(e)}), 500
 
 

@@ -63,22 +63,51 @@
   function insertEditorText(editor, text) {
     editor.focus()
 
-    // Quill-style contenteditable used by LinkedIn comment boxes.
-    editor.innerHTML = ''
-    const paragraph = document.createElement('p')
-    paragraph.textContent = text
-    editor.appendChild(paragraph)
+    // LinkedIn comment boxes use a Quill contenteditable. Setting innerHTML
+    // directly often leaves the "Post" button disabled because Quill's
+    // internal model is not updated. execCommand('insertText') is the most
+    // reliable way to make React/Quill pick up the change, so try it first.
+    let injected = false
+    try {
+      const sel = window.getSelection()
+      sel.removeAllRanges()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+      sel.addRange(range)
+      // Clear any existing content via selectAll + delete, then insert.
+      document.execCommand('selectAll', false, null)
+      document.execCommand('insertText', false, text)
+      injected = (editor.textContent || '').trim().length > 0
+    } catch (e) {
+      // fall through to manual DOM injection
+    }
 
+    if (!injected) {
+      editor.innerHTML = ''
+      const paragraph = document.createElement('p')
+      paragraph.textContent = text
+      editor.appendChild(paragraph)
+    }
+
+    // Fire a broad set of events so any framework listener (Quill, React,
+    // LinkedIn's own) registers the change and enables the Post button.
     editor.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }))
+    editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: text }))
     editor.dispatchEvent(new Event('change', { bubbles: true }))
+    editor.dispatchEvent(new Event('blur', { bubbles: true }))
 
     // Place caret at the end so the user can edit before publishing.
-    const selection = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(editor)
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
+    try {
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   async function prepareComment(payload) {
@@ -130,6 +159,11 @@
   async function prepareConnect(payload) {
     const connectButton = await waitFor(() => findActionButton(document, ['connect', 'установить контакт']))
     if (!connectButton) {
+      // Maybe we're already connected — look for "Message"/"Pending" state.
+      const messageBtn = findActionButton(document, ['message', 'сообщение'])
+      if (messageBtn) {
+        return { ok: true, prepared: 'connect', alreadyDone: true, note: 'Already connected.' }
+      }
       return { ok: false, error: 'Connect button not found. Open the author profile and try again.' }
     }
 
@@ -156,6 +190,29 @@
       }
     }
 
+    // ── Auto-send the connection request ────────────────────────────
+    // Click the "Send"/"Add"/"Done" button that appears in the connect dialog.
+    const sendButton = await waitFor(
+      () => {
+        // Prefer an explicit Send button inside the modal; avoid the original
+        // Connect button which we already clicked.
+        const btns = [...document.querySelectorAll('button')]
+          .filter(b => !b.disabled && b !== connectButton)
+        return btns.find(b => {
+          const label = `${b.getAttribute('aria-label') || ''} ${b.textContent || ''}`.toLowerCase()
+          return ['send', 'add', 'done', 'отправить', 'готово', 'connect', 'send now']
+            .some(p => label.includes(p))
+        })
+      },
+      5000
+    )
+
+    if (sendButton) {
+      sendButton.click()
+      await sleep(800)
+      return { ok: true, prepared: 'connect', submitted: true, note: 'Connection request sent automatically.' }
+    }
+
     return {
       ok: true,
       prepared: 'connect',
@@ -164,26 +221,51 @@
   }
 
   async function autoSubmitComment() {
-    // Find and click the "Post" button in the comment box
-    const postButton = findActionButton(document, ['post', 'отправить', 'comment'])
-    if (!postButton) {
-      // Try finding button by class or data attributes
-      const buttons = [...document.querySelectorAll('button')]
-      const submitBtn = buttons.find(btn => {
-        const text = btn.textContent?.toLowerCase() || ''
-        return text === 'post' || text === 'comment' || text === 'отправить'
+    // Find and click the "Post" button in the comment box. Prefer buttons that
+    // are NOT disabled (LinkedIn disables Post until the editor has text).
+    const submitBtn = (() => {
+      const candidates = [...document.querySelectorAll('button')]
+      // Exact-text match first (most reliable for the comment composer)
+      const exact = candidates.find(btn => {
+        const text = (btn.textContent || '').trim().toLowerCase()
+        return (text === 'post' || text === 'comment' || text === 'отправить') && !btn.disabled
       })
-      if (submitBtn) {
-        submitBtn.click()
-        await sleep(1000)
+      if (exact) return exact
+      // aria-label fallback
+      const labeled = candidates.find(btn => {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase()
+        return (label.includes('post comment') || label.includes('submit') || label.includes('отправить')) && !btn.disabled
+      })
+      return labeled || null
+    })()
+
+    if (!submitBtn) {
+      // Wait a moment in case the editor is still syncing its model, then retry once.
+      await sleep(700)
+      const retry = [...document.querySelectorAll('button')].find(btn => {
+        const text = (btn.textContent || '').trim().toLowerCase()
+        return (text === 'post' || text === 'comment' || text === 'отправить') && !btn.disabled
+      })
+      if (retry) {
+        retry.click()
+        await sleep(1200)
         return { ok: true, submitted: true, note: 'Comment posted automatically.' }
       }
-      return { ok: false, error: 'Post button not found. Please click Post manually.' }
+      return { ok: false, error: 'Post button not found (or still disabled — comment text may not have registered).' }
     }
 
-    postButton.click()
-    await sleep(1000)
-    return { ok: true, submitted: true, note: 'Comment posted automatically.' }
+    submitBtn.click()
+    await sleep(1200)
+
+    // Verify: the comment composer should have cleared or a new comment row appeared.
+    const editor = findCommentEditor(document)
+    const editorEmpty = editor && (editor.textContent || '').trim().length === 0
+    return {
+      ok: true,
+      submitted: true,
+      verified: !!editorEmpty,
+      note: editorEmpty ? 'Comment posted automatically.' : 'Post clicked; verify manually.',
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

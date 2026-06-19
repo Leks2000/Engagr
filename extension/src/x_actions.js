@@ -31,12 +31,26 @@
     // Clear existing content
     element.textContent = ''
 
-    // Use execCommand for better compatibility with React-managed DOM
-    document.execCommand('insertText', false, text)
+    // Use execCommand for better compatibility with React-managed DOM.
+    // selectAll + insertText is the most reliable way to make X's composer
+    // register the text and enable the Reply button.
+    let injected = false
+    try {
+      document.execCommand('selectAll', false, null)
+      document.execCommand('insertText', false, text)
+      injected = (element.textContent || '').trim().length > 0
+    } catch (e) {
+      /* fall through */
+    }
+
+    if (!injected) {
+      element.textContent = text
+    }
 
     // Dispatch input event
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }))
   }
 
   /**
@@ -238,25 +252,42 @@
    */
   async function autoSubmitReply() {
     try {
-      // Find the reply/submit button
-      const replyBtn = document.querySelector('[data-testid="tweetButton"]')
-      if (replyBtn) {
-        replyBtn.click()
-        await sleep(1000)
-        return { ok: true, submitted: true, note: 'Reply posted automatically.' }
+      // X disables the submit button until the composer has text. Wait for it
+      // to become enabled, then click. Prefer the modal reply button.
+      const findEnabled = () => {
+        const primary = document.querySelector('[data-testid="tweetButton"]')
+        if (primary && !primary.disabled) return primary
+        const inner = document.querySelector('[data-testid="tweetButtonInline"]')
+        if (inner && !inner.disabled) return inner
+        // Fallback: any enabled button whose testid ends with "Button" and
+        // whose label implies reply/post.
+        const btns = [...document.querySelectorAll('[data-testid$="Button"]')]
+        return btns.find(b => !b.disabled && (b.textContent || '').toLowerCase().includes('reply'))
       }
 
-      // Try alternative selectors
-      const buttons = document.querySelectorAll('[data-testid$="Button"]')
-      for (const btn of buttons) {
-        if (btn.textContent?.toLowerCase().includes('reply')) {
-          btn.click()
-          await sleep(1000)
-          return { ok: true, submitted: true, note: 'Reply posted automatically.' }
-        }
+      let replyBtn = await waitFor(findEnabled, 6000)
+      if (!replyBtn) {
+        // Retry once after a short sync delay
+        await sleep(700)
+        replyBtn = findEnabled()
+      }
+      if (!replyBtn) {
+        return { ok: false, error: 'Reply button not found (or still disabled — reply text may not have registered).' }
       }
 
-      return { ok: false, error: 'Reply button not found. Please click Reply manually.' }
+      replyBtn.click()
+      await sleep(1200)
+
+      // Verify: the composer should have cleared (X empties the textarea on
+      // successful post) or the modal closed.
+      const composer = document.querySelector('[data-testid="tweetTextarea_0"]')
+      const cleared = composer && (composer.textContent || '').trim().length === 0
+      return {
+        ok: true,
+        submitted: true,
+        verified: !!cleared,
+        note: cleared ? 'Reply posted automatically.' : 'Reply button clicked; verify manually.',
+      }
     } catch (err) {
       return { ok: false, error: `Auto-submit failed: ${err.message}` }
     }

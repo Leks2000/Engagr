@@ -97,18 +97,24 @@
 
   /**
    * The submit button for posting a top-level comment on new Reddit.
+   * Only returns enabled buttons (Reddit disables Comment until text exists).
    */
   function findNewRedditSubmitButton() {
+    const candidates = [
+      document.querySelector('faceplate-tracker[noun="submit_comment"] button'),
+      document.querySelector('button[type="submit"][data-testid="comment-submit"]'),
+      document.querySelector('shreddit-composer button[type="submit"]'),
+      document.querySelector('shreddit-comment-composer button[type="submit"]'),
+    ].filter(Boolean)
+    const enabled = candidates.find((b) => !b.disabled) || null
+    if (enabled) return enabled
+    // Text-based fallback (only enabled buttons)
     return (
-      document.querySelector('faceplate-tracker[noun="submit_comment"] button') ||
-      document.querySelector('button[type="submit"][data-testid="comment-submit"]') ||
-      document.querySelector('shreddit-composer button[type="submit"]') ||
-      document.querySelector('shreddit-comment-composer button[type="submit"]') ||
       [...document.querySelectorAll('button')].find((b) => {
+        if (b.disabled) return false
         const t = (b.textContent || '').trim().toLowerCase()
         return t === 'comment' || t === 'reply' || t === 'post comment'
-      }) ||
-      null
+      }) || null
     )
   }
 
@@ -177,14 +183,23 @@
   function setTextContentEditable(el, text) {
     el.focus()
     el.textContent = ''
-    // execCommand gives best compatibility with React/Lit-managed DOM
+    // execCommand gives best compatibility with React/Lit-managed DOM.
+    // selectAll + insertText is the reliable way to make Reddit's Lexical
+    // composer register the text and enable the Comment button.
+    let injected = false
     try {
+      document.execCommand('selectAll', false, null)
       document.execCommand('insertText', false, text)
+      injected = (el.textContent || '').trim().length > 0
     } catch (_) {
+      /* fall through */
+    }
+    if (!injected) {
       el.textContent = text
     }
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }))
   }
 
   function setTextarea(el, text) {
@@ -271,18 +286,36 @@
   async function autoSubmitComment() {
     try {
       const old = isOldReddit()
-      const btn = old
+      // Wait for an ENABLED submit button (Reddit disables it until the
+      // composer has text, which can lag slightly after input simulation).
+      let btn = old
         ? await waitFor(findOldRedditSubmitButton, 4000)
-        : await waitFor(findNewRedditSubmitButton, 6000)
+        : await waitFor(findNewRedditSubmitButton, 7000)
+
+      if (!btn && !old) {
+        // Retry once after a sync delay
+        await sleep(800)
+        btn = findNewRedditSubmitButton()
+      }
 
       if (!btn) {
-        return { ok: false, error: 'Comment submit button not found. Please click Comment manually.' }
+        return { ok: false, error: 'Comment submit button not found (or still disabled — comment text may not have registered).' }
       }
 
       btn.click()
       await sleep(1500)
 
-      return { ok: true, submitted: true, note: 'Comment posted automatically.' }
+      // Verify: composer should have cleared on success
+      const editor = old ? findOldRedditCommentEditor() : findNewRedditCommentEditor()
+      const cleared = editor && (editor.tagName && editor.tagName.toLowerCase() === 'textarea'
+        ? (editor.value || '').trim().length === 0
+        : (editor.textContent || '').trim().length === 0)
+      return {
+        ok: true,
+        submitted: true,
+        verified: !!cleared,
+        note: cleared ? 'Comment posted automatically.' : 'Comment clicked; verify manually.',
+      }
     } catch (err) {
       return { ok: false, error: `Auto-submit failed: ${err.message}` }
     }
