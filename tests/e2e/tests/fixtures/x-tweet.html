@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>X tweet fixture</title>
+</head>
+<body>
+  <!-- Snapshot of an X/Twitter tweet article (2025 DOM). The extension's
+       x_actions.js locates the reply button, opens the composer, and posts. -->
+  <article data-testid="tweet" role="article">
+    <div data-testid="User-Name">
+      <a href="/devnews"><span>Dev News</span></a>
+      <a href="/devnews"><span>@devnews</span></a>
+      <time datetime="2026-06-19T11:00:00.000Z">Jun 19</time>
+    </div>
+    <div data-testid="tweetText">Breaking: new JS framework promises zero-config SSR with edge rendering.</div>
+    <div role="group">
+      <button data-testid="reply" aria-label="Reply">Reply</button>
+      <button data-testid="retweet" aria-label="Repost">Repost</button>
+      <button data-testid="like" aria-label="Like">Like</button>
+    </div>
+  </article>
+</body>
+</html>

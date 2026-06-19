@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import MediaPreview from './MediaPreview'
 
 export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onRegenerate, onSelectVariant, onGenerateInvite, language = 'en' }) {
   const [copied, setCopied] = useState(false)
@@ -77,17 +78,6 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
       await onApprove({ doLike, doConnect })
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    }
-  }
-
-  // Open post for liking
-  const handleLike = () => {
-    const url = item.post_url
-    if (!url || url.includes('sim')) return
-    if (window.Telegram?.WebApp?.openLink) {
-      window.Telegram.WebApp.openLink(url)
-    } else {
-      window.open(url, '_blank')
     }
   }
 
@@ -215,8 +205,12 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
               : (item.post_text.length > 280 ? `${item.post_text.slice(0, 280)}…` : item.post_text)}
           </p>
         )}
-        <p>{item.post_excerpt || item.excerpt || ''}</p>
       </div>
+
+      {/* Post media (image / video preview) shown inline in the Mini App */}
+      {item.has_media && item.media && item.media.length > 0 && (
+        <MediaPreview media={item.media} color={platformColor} />
+      )}
 
       {/* View Post Link */}
       {item.post_url && !item.post_url.includes('sim') && (
@@ -338,9 +332,6 @@ export default function Card({ item, onApprove, onEdit, onSkip, onDecline, onReg
 
         {/* Secondary actions row */}
         <div className="queue-card-actions-row">
-          <button className="queue-btn-secondary" onClick={handleLike} title="Like post">
-            👍 {L.like}
-          </button>
           <button
             className="queue-btn-secondary"
             onClick={handleGenerateInvite}

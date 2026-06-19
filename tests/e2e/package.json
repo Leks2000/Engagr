@@ -1,0 +1,19 @@
+{
+  "name": "engagr-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright auto-test harness for the Engagr Mini App + extension action selectors",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:feed": "playwright test tests/feed.spec.js",
+    "test:media": "playwright test tests/media.spec.js",
+    "test:selectors": "playwright test tests/action-selectors.spec.js",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

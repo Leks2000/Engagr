@@ -60,6 +60,67 @@
     '[class*="feed-shared-text"]',
   ]
 
+  // ── Media selectors (LinkedIn 2025) ──────────────────────────────────────────
+  const MEDIA_IMAGE_SELECTORS = [
+    '.feed-shared-image img',
+    'img.feed-shared-image__image',
+    'img.update-components-image__image',
+    '.feed-shared-mini-images img',
+    '.update-components-article__image img',
+    '.feed-shared-article__image img',
+    '[data-test-id="feed-shared-image"] img',
+    '.feed-shared-update-v2__content img',
+  ]
+  const MEDIA_VIDEO_SELECTORS = [
+    'video.feed-shared-video__video',
+    'video[src]',
+    '.feed-shared-video',
+    '.update-components-video',
+    '.feed-shared-og-video',
+  ]
+
+  function absUrl(src) {
+    if (!src) return ''
+    const raw = String(src).split(' ')[0].split(',')[0]
+    try { return new URL(raw, window.location.origin).toString() } catch (_) { return raw.startsWith('http') ? raw : '' }
+  }
+
+  // Extract up to 6 media attachments (images / videos) from a post card.
+  // Avatars and tiny icons are skipped by a size threshold.
+  function extractMedia(card) {
+    const media = []
+    const seen = new Set()
+    for (const sel of MEDIA_IMAGE_SELECTORS) {
+      try {
+        card.querySelectorAll(sel).forEach((img) => {
+          if (!isVisible(img)) return
+          const url = absUrl(img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('srcset') || '')
+          if (!url || seen.has(url)) return
+          const rect = img.getBoundingClientRect()
+          if (rect.width < 50 && rect.height < 50) return
+          seen.add(url); media.push({ type: 'image', url })
+        })
+      } catch (_) {}
+    }
+    for (const sel of MEDIA_VIDEO_SELECTORS) {
+      try {
+        card.querySelectorAll(sel).forEach((node) => {
+          const tag = node.tagName && node.tagName.toLowerCase()
+          if (tag === 'video') {
+            const src = absUrl(node.getAttribute('src') || node.querySelector('source')?.getAttribute('src') || '')
+            const poster = absUrl(node.getAttribute('poster') || '')
+            if (src && !seen.has(src)) { seen.add(src); media.push({ type: 'video', url: src, thumbnail: poster }) }
+            else if (poster && !seen.has(poster)) { seen.add(poster); media.push({ type: 'video', url: '', thumbnail: poster }) }
+          } else {
+            const poster = absUrl(node.querySelector('img')?.getAttribute('src') || '')
+            if (poster && !seen.has(poster)) { seen.add(poster); media.push({ type: 'video', url: '', thumbnail: poster }) }
+          }
+        })
+      } catch (_) {}
+    }
+    return media.slice(0, 6)
+  }
+
   const NON_POST_TEXT_PATTERNS = [
     /^promoted$/i,
     /^show translation$/i,
@@ -212,7 +273,15 @@
     }
     const url = findPostUrl(card, urn)
     if (!textLooksLikePost(post, author)) return null
-    return { author: author || 'Unknown author', post, url, platform: 'linkedin' }
+    const media = extractMedia(card)
+    return {
+      author: author || 'Unknown author',
+      post,
+      url,
+      platform: 'linkedin',
+      media,
+      has_media: media.length > 0,
+    }
   }
 
   function closestCard(node) {
