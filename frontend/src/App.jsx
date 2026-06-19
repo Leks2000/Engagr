@@ -145,6 +145,14 @@ function App() {
     }
   }, [])
 
+  // Switch the Mini App display language. Persists to settings so the
+  // backend generates future translations in this language, and the Feed
+  // re-translates existing posts on the next render (see Feed useEffect).
+  const handleLanguageChange = useCallback(async (lang) => {
+    if (!SUPPORTED_LANGS.includes(lang)) return
+    await handleSettingsUpdate({ language: lang })
+  }, [handleSettingsUpdate])
+
   useEffect(() => {
     if (webAppReady) loadSettings()
   }, [webAppReady])
@@ -252,7 +260,7 @@ function App() {
             exit={{ opacity: 0, x: -24 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
-            {screen === 'feed' && <div className="page-transition"><Feed userId={userId} language={language} /></div>}
+            {screen === 'feed' && <div className="page-transition"><Feed userId={userId} language={language} onLanguageChange={handleLanguageChange} /></div>}
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
             {screen === 'settings' && <div className="page-transition"><Settings userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
             {screen === 'profile' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}

@@ -31,7 +31,7 @@ function formatDate(value) {
 }
 
 // ─── Feed Screen ────────────────────────────────────────────────
-export default function Feed({ userId, language = 'en' }) {
+export default function Feed({ userId, language = 'en', onLanguageChange }) {
   const [items, setItems]               = useState([])
   const [loading, setLoading]           = useState(true)
   const [refreshing, setRefreshing]     = useState(false)
@@ -82,6 +82,22 @@ export default function Feed({ userId, language = 'en' }) {
     const interval = setInterval(() => loadFeed(), 15000)
     return () => clearInterval(interval)
   }, [loadFeed])
+
+  // ── When the UI language changes, ask the backend to re-translate all
+  //    visible posts + comment variants, then reload the feed so the
+  //    translated bodies/variants render. The original-language comment
+  //    that gets posted is never mutated — only the display translation.
+  useEffect(() => {
+    if (!language) return
+    let cancelled = false
+    setRefreshing(true)
+    api.post(`/api/queue/${userId}/translate-all`, { language })
+      .then(() => { if (!cancelled) loadFeed(true) })
+      .catch(err => console.error('translate-all failed:', err))
+      .finally(() => { if (!cancelled) setRefreshing(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language])
 
   const counts = useMemo(() => {
     const byStatus   = Object.fromEntries(STATUSES.map(s  => [s,  s  === 'all' ? items.length : 0]))
@@ -288,7 +304,23 @@ export default function Feed({ userId, language = 'en' }) {
             {refreshing ? 'Updating…' : `Updated: ${lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}`}
           </p>
         </div>
-        <button className="btn btn-sm" onClick={loadFeed} disabled={refreshing}>↻ Refresh</button>
+        <div className="flex items-center gap-2">
+          {onLanguageChange && (
+            <select
+              value={language}
+              onChange={(e) => onLanguageChange(e.target.value)}
+              className="text-xs rounded-lg border px-2 py-1.5"
+              style={{ borderColor: '#e5e7eb', background: '#fff', color: '#334155', cursor: 'pointer' }}
+              title="Display language"
+            >
+              <option value="en">EN</option>
+              <option value="ru">RU</option>
+              <option value="es">ES</option>
+              <option value="de">DE</option>
+            </select>
+          )}
+          <button className="btn btn-sm" onClick={loadFeed} disabled={refreshing}>↻ Refresh</button>
+        </div>
       </div>
 
       {/* ── Action-needed banner ───────────────────────────────── */}
