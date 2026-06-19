@@ -14,7 +14,6 @@ const QUEUE_I18N = {
     emptyReviewTitle: 'Nothing to review',
     emptyReviewHint: 'New posts with AI variants will appear here.',
     refresh: 'Refresh', updating: 'Updating', last: 'Updated',
-    approveAll: '✅ Approve All', skipAll: '❌ Skip All',
     simulate: '⚡ Simulate',
     editingComment: 'Editing comment', save: '💾 Save', cancel: 'Cancel',
     generateReply: '⚡ Generate AI reply',
@@ -30,7 +29,6 @@ const QUEUE_I18N = {
     emptyReviewTitle: 'Нечего проверять',
     emptyReviewHint: 'Новые посты с AI вариантами будут здесь.',
     refresh: 'Обновить', updating: 'Обновление', last: 'Обновлено',
-    approveAll: '✅ Одобрить все', skipAll: '❌ Пропустить все',
     simulate: '⚡ Симуляция',
     editingComment: 'Редактирование', save: '💾 Сохранить', cancel: 'Отмена',
     generateReply: '⚡ Сгенерировать AI ответ',
@@ -46,7 +44,6 @@ const QUEUE_I18N = {
     emptyReviewTitle: 'Nada para revisar',
     emptyReviewHint: 'Los posts nuevos con variantes de IA aparecerán aquí.',
     refresh: 'Actualizar', updating: 'Actualizando', last: 'Actualizado',
-    approveAll: '✅ Aprobar todo', skipAll: '❌ Saltar todo',
     simulate: '⚡ Simular',
     editingComment: 'Editando', save: '💾 Guardar', cancel: 'Cancelar',
     generateReply: '⚡ Generar respuesta IA',
@@ -62,7 +59,6 @@ const QUEUE_I18N = {
     emptyReviewTitle: 'Nichts zu prüfen',
     emptyReviewHint: 'Neue Posts mit KI-Varianten erscheinen hier.',
     refresh: 'Aktualisieren', updating: 'Aktualisiert', last: 'Zuletzt',
-    approveAll: '✅ Alle genehmigen', skipAll: '❌ Alle überspringen',
     simulate: '⚡ Simulieren',
     editingComment: 'Bearbeiten', save: '💾 Speichern', cancel: 'Abbrechen',
     generateReply: '⚡ KI-Antwort generieren',
@@ -118,8 +114,6 @@ export default function Queue({ userId, language = 'en' }) {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
-  // eslint-disable-next-line no-unused-vars
-  const [_bulkLoading, _setBulkLoading] = useState(false)
   const [simulating, setSimulating] = useState(false)
   // 0.3 — per-item AI generation state
   const [generatingIds, setGeneratingIds] = useState(new Set())
@@ -214,30 +208,6 @@ export default function Queue({ userId, language = 'en' }) {
       await api.post(`/api/queue/${userId}/${itemId}/skip`)
       setQueue(q => q.filter(i => i.id !== itemId))
     } catch (err) { console.error('Skip error:', err) }
-  }
-
-  // Bulk approve/skip intentionally hidden — every action requires individual review
-  // (kept for future use, not exposed in UI)
-  // eslint-disable-next-line no-unused-vars
-  const handleApproveAll = async () => {
-    for (const item of [...activeList]) {
-      if (item._simulated) { setQueue(q => q.filter(i => i.id !== item.id)); continue }
-      try {
-        await api.post(`/api/queue/${userId}/${item.id}/approve`)
-        setQueue(q => q.filter(i => i.id !== item.id))
-      } catch { /* ignored */ }
-    }
-  }
-
-  // eslint-disable-next-line no-unused-vars
-  const handleSkipAll = async () => {
-    for (const item of [...activeList]) {
-      if (item._simulated) { setQueue(q => q.filter(i => i.id !== item.id)); continue }
-      try {
-        await api.post(`/api/queue/${userId}/${item.id}/skip`)
-        setQueue(q => q.filter(i => i.id !== item.id))
-      } catch { /* ignored */ }
-    }
   }
 
   const handleRegenerate = async (itemId) => {
@@ -419,8 +389,6 @@ export default function Queue({ userId, language = 'en' }) {
           )
         })}
       </div>
-
-      {/* Bulk approve is intentionally hidden: every publish action must be individually reviewed, variant-selected, and approved by the user. */}
 
       {/* Empty state */}
       {activeList.length === 0 ? (
