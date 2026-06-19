@@ -860,6 +860,12 @@ def extension_posts_push():
             platform  = (raw.get("platform") or "linkedin").lower()
             if platform == "twitter":
                 platform = "x"
+            # Media attachments extracted by the extension parsers
+            raw_media = raw.get("media") or []
+            media = [
+                m for m in (raw_media if isinstance(raw_media, list) else [])
+                if isinstance(m, dict) and (m.get("url") or m.get("thumbnail"))
+            ][:6]
 
             if not post_text or len(post_text) < 10:
                 skipped += 1
@@ -913,6 +919,8 @@ def extension_posts_push():
                 "post_text": post_text,
                 "author": author,
                 "author_name": author,
+                "media": media,                  # [{type, url, thumbnail?}] from parsers
+                "has_media": len(media) > 0,
                 "comment": "",
                 "selected_comment": "",
                 "comment_variants": [],

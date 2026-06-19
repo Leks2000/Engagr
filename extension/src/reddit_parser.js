@@ -68,6 +68,58 @@
       .trim()
   }
 
+  function absUrl(src) {
+    if (!src) return ''
+    const raw = String(src).split(' ')[0].split(',')[0]
+    try { return new URL(raw, window.location.origin).toString() } catch (_) { return raw.startsWith('http') ? raw : '' }
+  }
+
+  // ── Media extraction (shared by old + new Reddit) ────────────────────────
+  // Pulls up to 6 image / video attachments. Skips subreddit logos / avatars
+  // via a small size threshold and an allow-list of gallery/post containers.
+  function extractMediaFrom(root, isOld) {
+    const media = []
+    const seen = new Set()
+    const push = (m) => { const key = m.url || m.thumbnail || ''; if (key && !seen.has(key)) { seen.add(key); media.push(m) } }
+
+    if (isOld) {
+      // Old Reddit: .thumbnail img, gallery img, video embed
+      root.querySelectorAll('.thumbnail img, a.thumbnail img').forEach((img) => {
+        const url = absUrl(img.getAttribute('src') || '')
+        const rect = img.getBoundingClientRect()
+        if (url && rect.width >= 50) push({ type: 'image', url })
+      })
+      root.querySelectorAll('img.title').forEach((img) => {
+        const url = absUrl(img.getAttribute('src') || '')
+        if (url) push({ type: 'image', url })
+      })
+      // Old Reddit video: <video> inside the thing, or preview.redd.it poster
+      root.querySelectorAll('video').forEach((v) => {
+        const src = absUrl(v.getAttribute('src') || v.querySelector('source')?.getAttribute('src') || '')
+        const poster = absUrl(v.getAttribute('poster') || '')
+        push({ type: 'video', url: src, thumbnail: poster })
+      })
+    } else {
+      // New Reddit / shreddit
+      root.querySelectorAll('img[data-testid="post-image"], img.post-image, gallery-carousel img, shreddit-post img').forEach((img) => {
+        const url = absUrl(img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('srcset') || '')
+        const rect = img.getBoundingClientRect()
+        if (url && (rect.width >= 60 || !rect.width)) push({ type: 'image', url })
+      })
+      root.querySelectorAll('video').forEach((v) => {
+        const src = absUrl(v.getAttribute('src') || v.querySelector('source')?.getAttribute('src') || '')
+        const poster = absUrl(v.getAttribute('poster') || '')
+        push({ type: 'video', url: src, thumbnail: poster })
+      })
+      // shreddit-gallery / media-preview slot
+      root.querySelectorAll('[slot="post-media-content"] img, [data-testid="post-content"] img').forEach((img) => {
+        const url = absUrl(img.getAttribute('src') || img.getAttribute('srcset') || '')
+        if (url) push({ type: 'image', url })
+      })
+    }
+    return media.slice(0, 6)
+  }
+
   // ── Old Reddit parser ─────────────────────────────────────
 
   function parseOldRedditPost(el) {
@@ -102,6 +154,7 @@
       const bodyText = normalizeText(selfTextEl?.textContent)
 
       const postText = bodyText || title
+      const media = extractMediaFrom(el, true)
 
       return {
         author: author ? `u/${author.replace(/^u\//, '')}` : 'Unknown',
@@ -111,6 +164,8 @@
         subreddit: subreddit || '',
         score,
         comments,
+        media,
+        has_media: media.length > 0,
         platform: 'reddit',
       }
     } catch (err) {
@@ -139,6 +194,8 @@
         const bodyEl = el.querySelector('[slot="post-media-content"] p, .post-content p, [data-adclicklocation="media"] p')
         const bodyText = normalizeText(bodyEl?.textContent)
 
+        const media = extractMediaFrom(el, false)
+
         return {
           author: author ? `u/${author.replace(/^u\//, '')}` : 'Unknown',
           post: bodyText || title,
@@ -147,6 +204,8 @@
           subreddit: subreddit.replace(/^r\//, ''),
           score,
           comments: commentCount,
+          media,
+          has_media: media.length > 0,
           platform: 'reddit',
         }
       }
@@ -182,6 +241,7 @@
       const bodyText = normalizeText(bodyEl?.textContent)
 
       const postText = bodyText || title
+      const media = extractMediaFrom(el, false)
 
       return {
         author: author ? `u/${author.replace(/^u\//, '')}` : 'Unknown',
@@ -191,6 +251,8 @@
         subreddit,
         score,
         comments: 0,
+        media,
+        has_media: media.length > 0,
         platform: 'reddit',
       }
     } catch (err) {

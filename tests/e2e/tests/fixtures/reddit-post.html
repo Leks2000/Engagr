@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reddit post fixture</title>
+</head>
+<body>
+  <!-- Snapshot of a new-Reddit (shreddit) post (2025 DOM). The extension's
+       reddit_actions.js locates the upvote control and the comment composer. -->
+  <shreddit-app>
+    <shreddit-post
+      post-title="Check out this sunset from the trail today"
+      permalink="/r/EarthPorn/comments/abc/sunset/"
+      author="poster"
+      subreddit-prefixed-name="r/EarthPorn"
+      score="1284"
+      comment-count="42"
+    >
+      <div slot="post-media-content">
+        <img src="https://example.com/sunset.jpg" alt="sunset" />
+      </div>
+      <div data-testid="vote-actions">
+        <button data-testid="upvote" aria-label="upvote" style="display:inline-block;width:32px;height:32px">▲</button>
+        <span data-testid="vote-count">1.3k</span>
+      </div>
+    </shreddit-post>
+    <div data-testid="comment-composer">
+      <div contenteditable="true" role="textbox" aria-label="Write a comment"></div>
+    </div>
+  </shreddit-app>
+</body>
+</html>

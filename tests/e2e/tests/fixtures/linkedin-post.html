@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LinkedIn post fixture</title>
+</head>
+<body>
+  <!-- Snapshot of a LinkedIn feed post card (2025 DOM). The extension's
+       linkedin_actions.js opens the comment composer via this structure. -->
+  <div data-urn="urn:li:activity:7280000000000000000" class="feed-shared-update-v2">
+    <div class="update-components-actor">
+      <span class="update-components-actor__name"><span aria-hidden="true">Jane Doe</span></span>
+    </div>
+    <div class="update-components-text">
+      <span dir="ltr">We just shipped our new AI search feature — it cuts research time by 40%.</span>
+    </div>
+    <!-- Comment composer (opened after clicking the Comment action button) -->
+    <div class="comments-comment-box__comment-editor-container">
+      <div class="ql-editor" contenteditable="true" role="textbox" aria-label="Write a comment"></div>
+    </div>
+    <button type="button" aria-disabled="false">Post</button>
+  </div>
+</body>
+</html>

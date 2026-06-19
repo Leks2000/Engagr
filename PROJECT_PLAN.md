@@ -314,11 +314,14 @@ Feed status updates: approved → executing → published / failed
 
 > The current `Dashboard.jsx` shows live session logs, warm-up mode, analytics charts, and stat cards, but the full funnel (declined/skipped counts, CTR, AI cost) is Stage 4 work.
 
-### Stage 5 — Automated testing & self-healing (deferred — after stability)
+### Stage 5 — Automated testing & self-healing (✅ harness landed this iteration)
 
-- Connect **Browser MCP / Playwright** so the AI can auto-test after each change: start the app → open LinkedIn/X/Reddit → exercise the Feed (approve/decline/retry) → click buttons → collect a bug report.
-- Record-selector self-healing: when a platform changes a button, the harness detects the breakage, searches for the new selector, and proposes/saves an update.
-- This stage is explicitly **after the loop is stable** so we don't spend resources on tests for a moving target.
+- [x] **Playwright auto-test harness** (`tests/e2e/`): drives the Mini App in Chromium fully offline. A mock backend (`fixtures.js`) mirrors the real API (settings, queue, regenerate/select/approve/skip/decline, translate-all) so tests run with no Railway/Telegram/extension.
+  - `feed.spec.js`: render items · generate variants for `new_post` · select variant + Approve flips status · Decline updates badge · status chip counts.
+  - `media.spec.js`: inline `MediaPreview` image renders and actually decodes (guards the Telegram-media feature).
+  - `action-selectors.spec.js`: LinkedIn/X/Reddit selector regression guards against saved fixture HTML — catches platform UI drift before posting breaks in prod. **10/10 tests passing.**
+- [ ] Record-selector self-healing: auto-detect a broken selector and propose the new one (next iteration — fixture-driven guard already in place).
+- Run with `cd tests/e2e && npm install && npm run install:browsers && npm test`.
 
 ### Deferred / legacy areas
 

@@ -763,10 +763,83 @@ def _new_post_card_keyboard(item: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+async def _send_new_post_card_with_media(app, user_id: str, item: dict) -> bool:
+    """
+    Send a post card with its first image/video attachment inline in Telegram.
+    Uses sendPhoto for images, sendVideo for videos. Falls back to False if
+    no usable media URL is present so the caller can send a plain text card.
+    Returns True on a successful media send.
+    """
+    media = item.get("media") or []
+    if not isinstance(media, list) or not media:
+        return False
+    caption = _new_post_card_text(item)
+    # Telegram caption limits: 1024 chars for photos / videos.
+    if len(caption) > 1024:
+        caption = caption[:1020] + "…"
+    keyboard = _new_post_card_keyboard(item)
+    chat_id = int(user_id)
+
+    for attachment in media:
+        if not isinstance(attachment, dict):
+            continue
+        url = (attachment.get("url") or "").strip()
+        thumb = (attachment.get("thumbnail") or "").strip()
+        kind = (attachment.get("type") or "image").lower()
+
+        # Videos: need a real video URL. Some parsers only capture a poster
+        # thumbnail (e.g. Reddit/LinkedIn previews) — in that case send the
+        # thumbnail as a photo so the user still sees the frame inline.
+        if kind == "video" and url and url.startswith("http"):
+            try:
+                await app.bot.send_video(
+                    chat_id=chat_id,
+                    video=url,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+                return True
+            except Exception as e:
+                logger.warning("send_video failed (will try thumbnail): %s", e)
+                if thumb and thumb.startswith("http"):
+                    try:
+                        await app.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=thumb,
+                            caption=caption,
+                            parse_mode="Markdown",
+                            reply_markup=keyboard,
+                        )
+                        return True
+                    except Exception as e2:
+                        logger.warning("send_photo(thumbnail) failed: %s", e2)
+                continue
+
+        # Images (or video-with-only-thumbnail): send the image inline.
+        img_url = url if (kind == "image" and url and url.startswith("http")) else thumb
+        if img_url and img_url.startswith("http"):
+            try:
+                await app.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=img_url,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+                return True
+            except Exception as e:
+                logger.warning("send_photo failed: %s", e)
+                continue
+    return False
+
+
 async def send_new_post_cards(user_id: str, items: list):
     """
     Send newly auto-scanned post cards to the user in Telegram.
     Each card has [Сгенерировать комментарий] and [Пропустить] buttons.
+    If a post has media attachments, the card is sent via sendPhoto /
+    sendVideo so the user sees the image/video inline in Telegram.
     Called from main.py after extension pushes new posts.
     """
     app = _bot_app
@@ -777,13 +850,15 @@ async def send_new_post_cards(user_id: str, items: list):
     sent = 0
     for item in items[:5]:  # max 5 per scan to avoid spam
         try:
-            await app.bot.send_message(
-                chat_id=int(user_id),
-                text=_new_post_card_text(item),
-                reply_markup=_new_post_card_keyboard(item),
-                parse_mode="Markdown",
-                disable_web_page_preview=True,
-            )
+            if not await _send_new_post_card_with_media(app, user_id, item):
+                # No usable media → fall back to a plain text card
+                await app.bot.send_message(
+                    chat_id=int(user_id),
+                    text=_new_post_card_text(item),
+                    reply_markup=_new_post_card_keyboard(item),
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True,
+                )
             sent += 1
             # Small delay to avoid Telegram rate limits
             await asyncio.sleep(0.5)

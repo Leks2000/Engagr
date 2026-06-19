@@ -121,11 +121,38 @@
       }
 
       const isLiked = !!article.querySelector(SELECTORS.unlikeButton)
-      const hasMedia = !!(
-        article.querySelector('[data-testid="tweetPhoto"]') ||
-        article.querySelector('[data-testid="videoPlayer"]') ||
-        article.querySelector('[data-testid="card.wrapper"]')
-      )
+
+      // ── Media extraction (images + videos) ───────────────────────────────
+      const media = []
+      const seenMedia = new Set()
+      const abs = (src) => { if (!src) return ''; const r = String(src).split(' ')[0].split(',')[0]; try { return new URL(r, window.location.origin).toString() } catch (_) { return r.startsWith('http') ? r : '' } }
+
+      // Photos
+      article.querySelectorAll('[data-testid="tweetPhoto"] img').forEach((img) => {
+        const url = abs(img.getAttribute('src') || img.getAttribute('srcset') || '')
+        if (url && !seenMedia.has(url)) { seenMedia.add(url); media.push({ type: 'image', url }) }
+      })
+      // Video player: prefer the video src, fall back to poster image
+      const vidEl = article.querySelector('[data-testid="videoPlayer"] video')
+      if (vidEl) {
+        const src = abs(vidEl.getAttribute('src') || vidEl.querySelector('source')?.getAttribute('src') || '')
+        const poster = abs(vidEl.getAttribute('poster') || '')
+        const key = src || poster
+        if (key && !seenMedia.has(key)) {
+          seenMedia.add(key)
+          media.push({ type: 'video', url: src, thumbnail: poster })
+        }
+      }
+      // Animated GIF / looped video without the videoPlayer testid
+      article.querySelectorAll('video[poster]').forEach((v) => {
+        const src = abs(v.getAttribute('src') || '')
+        const poster = abs(v.getAttribute('poster') || '')
+        const key = src || poster
+        if (key && !seenMedia.has(key)) { seenMedia.add(key); media.push({ type: 'video', url: src, thumbnail: poster }) }
+      })
+
+      const hasMedia = media.length > 0 ||
+        !!article.querySelector('[data-testid="card.wrapper"]')
       const timestamp = timeEl?.getAttribute('datetime') || ''
 
       return {
@@ -136,6 +163,7 @@
         metrics,
         isLiked,
         hasMedia,
+        media,
         timestamp,
         platform: 'x',
       }

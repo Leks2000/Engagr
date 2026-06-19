@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../App'
 import Card from '../components/Card'
+import MediaPreview from '../components/MediaPreview'
 
 const STATUSES = ['all', 'new_post', 'pending', 'approved', 'executing', 'published', 'failed', 'declined', 'skipped']
 const PLATFORMS = ['all', 'x', 'reddit', 'linkedin']
@@ -297,9 +298,6 @@ export default function Feed({ userId, language = 'en', onLanguageChange }) {
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h1 className="text-xl font-bold tracking-tight">Feed</h1>
-          <p className="text-xs mt-1" style={{ color: 'var(--color-muted)' }}>
-            Unified post feed from X, Reddit, and LinkedIn. Select a variant and approve before the extension acts.
-          </p>
           <p className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>
             {refreshing ? 'Updating…' : `Updated: ${lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}`}
           </p>
@@ -517,6 +515,10 @@ function NewPostCard({ item, error, isGenerating, onGenerate, onSkip, onDecline 
         <p>{text.length > 300 ? `${text.slice(0, 300)}…` : text}</p>
       </div>
 
+      {item.has_media && item.media && item.media.length > 0 && (
+        <MediaPreview media={item.media} color={color} />
+      )}
+
       {item.post_url && !item.post_url.includes('sim') && (
         <a
           href={item.post_url} target="_blank" rel="noopener noreferrer"
@@ -590,6 +592,10 @@ function StatusPostCard({ item, onSkip, onDecline, onRetry, onRegenerate, onExpa
             <p style={{ fontWeight: 600, marginBottom: 6, fontSize: 11, color: '#94a3b8' }}>Post</p>
             <p>{text.length > 300 ? `${text.slice(0, 300)}…` : text}</p>
           </div>
+
+          {item.has_media && item.media && item.media.length > 0 && (
+            <MediaPreview media={item.media} color={color} />
+          )}
 
           {comment && (
             <div className="queue-card-comment mt-2" style={{ borderColor: color, background: '#f8fafc' }}>
