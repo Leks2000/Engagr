@@ -93,13 +93,35 @@ export const mediaItem = {
  * the feed will see. Mutations (select/approve/skip/decline) update an
  * in-memory store so subsequent GET /api/queue reflects the new status.
  */
-export async function installMockBackend(page, { items = [], language = 'en' } = {}) {
+export async function installMockBackend(page, { items = [], language = 'en', proxyFails = false } = {}) {
+  // Intercept the media-proxy image request at the network layer. <img src>
+  // loading bypasses the window.fetch override below (the browser's image
+  // loader does not go through fetch), so we must fulfil it here. When
+  // proxyFails is set we simulate the CDN hotlink 403 that MediaPreview's
+  // graceful fallback is designed for.
+  await page.route('**/api/media/proxy**', async (route) => {
+    if (proxyFails) {
+      await route.fulfill({ status: 502, contentType: 'text/plain', body: 'upstream 403' })
+    } else {
+      // 1x1 transparent PNG — enough for the <img> to decode successfully.
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+          'base64',
+        ),
+      })
+    }
+  })
+
   // In-memory mutable store scoped to this page
-  await page.addInitScript(([storeItems, storeLang, userId]) => {
+  await page.addInitScript(([storeItems, storeLang, userId, storeProxyFails]) => {
     window.__ENGAGR_MOCK__ = {
       userId,
       settings: { onboarding_completed: true, language: storeLang },
       queue: JSON.parse(JSON.stringify(storeItems)),
+      proxyFails: storeProxyFails,
     }
 
     const match = (url, pattern) => {
@@ -141,6 +163,19 @@ export async function installMockBackend(page, { items = [], language = 'en' } =
         // Queue GET
         if (match(urlStr, `/api/queue/${m.userId}`) && method === 'GET')
           return json(m.queue)
+
+        // Media proxy: in tests we don't need a real CDN fetch. When
+        // proxyFails is set we simulate a hotlink 403 (used by the
+        // fallback/regression test); otherwise return a 1x1 PNG so the
+        // <img> decodes successfully and MediaPreview shows inline.
+        if (path === '/api/media/proxy' && method === 'GET') {
+          if (m.proxyFails) return new Response('upstream 403', { status: 502 })
+          // 1x1 transparent PNG
+          const png = Uint8Array.from(atob(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC'
+          ), c => c.charCodeAt(0))
+          return new Response(png, { status: 200, headers: { 'content-type': 'image/png' } })
+        }
 
         // translate-all (no-op mock: items already in requested language)
         if (match(urlStr, `/api/queue/${m.userId}/translate-all`) && method === 'POST')
@@ -191,7 +226,7 @@ export async function installMockBackend(page, { items = [], language = 'en' } =
     }
     // Install as early as possible
     window.__ENGAGR_INSTALL__()
-  }, [items, language, USER_ID])
+  }, [items, language, USER_ID, proxyFails])
 }
 
 /** Convenience: open the app on the Feed screen and wait for it to render. */

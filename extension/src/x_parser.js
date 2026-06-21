@@ -126,10 +126,22 @@
       const media = []
       const seenMedia = new Set()
       const abs = (src) => { if (!src) return ''; const r = String(src).split(' ')[0].split(',')[0]; try { return new URL(r, window.location.origin).toString() } catch (_) { return r.startsWith('http') ? r : '' } }
+      // Pick the best URL from an <img>: highest-res srcset candidate, then
+      // lazy attributes, then the regular src. X lazy-loads with data-srcset.
+      const bestImgUrl = (img) => {
+        const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || ''
+        if (srcset) {
+          const best = srcset.split(',')
+            .map(c => { const [u, w] = c.trim().split(/\s+/); const x = parseFloat((w || '').replace('w', '')) || 0; return { u, x } })
+            .sort((a, b) => b.x - a.x)[0]
+          if (best && best.u) return abs(best.u)
+        }
+        return abs(img.getAttribute('src') || img.getAttribute('data-src') || '')
+      }
 
       // Photos
       article.querySelectorAll('[data-testid="tweetPhoto"] img').forEach((img) => {
-        const url = abs(img.getAttribute('src') || img.getAttribute('srcset') || '')
+        const url = bestImgUrl(img)
         if (url && !seenMedia.has(url)) { seenMedia.add(url); media.push({ type: 'image', url }) }
       })
       // Video player: prefer the video src, fall back to poster image
