@@ -295,13 +295,18 @@ async function executeLinkedInAction(actionStep, task) {
   }
 
   if (actionType === 'comment') {
+    // Probe the comment-box selector against the live DOM (fire-and-forget,
+    // debounced, never blocks the action) so self-healing can catch drift.
+    maybeProbeActionSelector(tab.id, 'linkedin', 'comment', postUrl)
     const result = await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_PREPARE_COMMENT',
       payload: { url: postUrl, comment: actionStep.comment || '' },
     })
 
     if (result?.ok) {
-      // Auto-submit
+      // Auto-submit — probe the post-button selector too, since it is the
+      // other half of the comment flow and the most common silent-break point.
+      maybeProbeActionSelector(tab.id, 'linkedin', 'post_button', postUrl)
       await new Promise(r => setTimeout(r, 1000))
       const postResult = await chrome.tabs.sendMessage(tab.id, {
         type: 'ENGAGR_AUTO_SUBMIT_COMMENT',
@@ -313,6 +318,7 @@ async function executeLinkedInAction(actionStep, task) {
   }
 
   if (actionType === 'like') {
+    maybeProbeActionSelector(tab.id, 'linkedin', 'like', postUrl)
     return await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_LIKE_POST',
       payload: { url: postUrl },
@@ -320,6 +326,7 @@ async function executeLinkedInAction(actionStep, task) {
   }
 
   if (actionType === 'connect') {
+    maybeProbeActionSelector(tab.id, 'linkedin', 'connect', postUrl)
     return await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_PREPARE_CONNECT',
       payload: { url: postUrl, message: actionStep.message || '' },
@@ -355,13 +362,15 @@ async function executeXAction(actionStep, task) {
   }
 
   if (actionType === 'reply') {
+    maybeProbeActionSelector(tab.id, 'x', 'reply', postUrl)
     const result = await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_PREPARE_X_REPLY',
       payload: { url: postUrl, comment: actionStep.comment || '' },
     })
 
     if (result?.ok) {
-      // Auto-submit
+      // Auto-submit — probe the reply submit button selector too.
+      maybeProbeActionSelector(tab.id, 'x', 'post_button', postUrl)
       await new Promise(r => setTimeout(r, 1000))
       const submitResult = await chrome.tabs.sendMessage(tab.id, {
         type: 'ENGAGR_AUTO_SUBMIT_X_REPLY',
@@ -373,6 +382,7 @@ async function executeXAction(actionStep, task) {
   }
 
   if (actionType === 'like') {
+    maybeProbeActionSelector(tab.id, 'x', 'like', postUrl)
     return await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_LIKE_X_TWEET',
       payload: { url: postUrl },
@@ -380,6 +390,7 @@ async function executeXAction(actionStep, task) {
   }
 
   if (actionType === 'follow') {
+    maybeProbeActionSelector(tab.id, 'x', 'follow', postUrl)
     return await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_FOLLOW_X_USER',
       payload: { url: postUrl },
@@ -417,13 +428,15 @@ async function executeRedditAction(actionStep, task) {
   }
 
   if (actionType === 'comment') {
+    maybeProbeActionSelector(tab.id, 'reddit', 'comment', postUrl)
     const result = await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_PREPARE_REDDIT_COMMENT',
       payload: { url: postUrl, comment: actionStep.comment || '' },
     })
 
     if (result?.ok) {
-      // Auto-submit
+      // Auto-submit — probe the comment submit button selector too.
+      maybeProbeActionSelector(tab.id, 'reddit', 'post_button', postUrl)
       await new Promise(r => setTimeout(r, 1000))
       const submitResult = await chrome.tabs.sendMessage(tab.id, {
         type: 'ENGAGR_AUTO_SUBMIT_REDDIT_COMMENT',
@@ -435,6 +448,7 @@ async function executeRedditAction(actionStep, task) {
   }
 
   if (actionType === 'upvote') {
+    maybeProbeActionSelector(tab.id, 'reddit', 'upvote', postUrl)
     const result = await chrome.tabs.sendMessage(tab.id, {
       type: 'ENGAGR_REDDIT_UPVOTE',
       payload: { url: postUrl },
@@ -563,6 +577,90 @@ async function probeSelector(tabId, platform, action, selector, baseUrl, jwtToke
   // Report async, do not await — never block the action
   reportSelectorProbe(platform, action, selector, found, baseUrl, jwtToken, userId, snippet, url)
   return found
+}
+
+/**
+ * Primary CSS selector each action relies on, keyed by `platform:action`.
+ * These are the selectors most likely to silently drift when a platform
+ * redesigns — they are what the self-healing system probes before every
+ * action so a breakage is caught (and Groq-healed) instead of failing the
+ * post silently. Only the *primary* selector is probed (the fallback chain
+ * in *_actions.js still runs for the actual click); probing every fallback
+ * would spam the backend and drown the signal.
+ */
+const ACTION_SELECTORS = {
+  'linkedin:comment':     '.comments-comment-box .ql-editor',
+  'linkedin:post_button': 'button[type="button"][aria-disabled="false"]',
+  'linkedin:like':        'button[aria-label*="Like" i]',
+  'linkedin:connect':     'button[aria-label*="Connect" i]',
+  'x:reply':              '[data-testid="reply"]',
+  'x:post_button':        '[data-testid="tweetButton"]',
+  'x:like':               '[data-testid="like"]',
+  'x:follow':             '[data-testid$="-follow"]',
+  'reddit:comment':       '[contenteditable="true"][role="textbox"]',
+  'reddit:post_button':   'button[type="submit"][data-testid="comment-submit"]',
+  'reddit:upvote':        '[data-testid="upvote"]',
+}
+
+/**
+ * Debounce map: { "<platform>:<action>" -> lastProbeAtMs }.
+ * One probe per platform:action per PROBE_THROTTLE_MS, so rapid actions
+ * (e.g. back-to-back likes) don't fire a probe on every single click and
+ * hammer the backend / SelfHealing log. The throttle is short enough that a
+ * real breakage is reported within a minute, but long enough to dedupe a
+ * burst of the same action.
+ */
+const PROBE_THROTTLE_MS = 60_000
+const _probeLastAt = new Map()
+
+function _shouldProbe(platform, action) {
+  const key = `${platform}:${action}`
+  const now = Date.now()
+  const last = _probeLastAt.get(key) || 0
+  if (now - last < PROBE_THROTTLE_MS) return false
+  _probeLastAt.set(key, now)
+  return true
+}
+
+/**
+ * Read { baseUrl, jwtToken, userId } from extension storage once and cache
+ * briefly so we don't hit chrome.storage on every action. The probe helpers
+ * need these to authenticate the POST /api/extension/selector/probe call.
+ */
+let _authCtxCache = null
+let _authCtxAt = 0
+async function _authCtx() {
+  // Cache 30s — settings rarely change mid-session, and this is called on
+  // every action dispatch.
+  if (_authCtxCache && Date.now() - _authCtxAt < 30_000) return _authCtxCache
+  const s = await chrome.storage.sync.get(['apiBaseUrl', 'jwtToken', 'telegramUserId'])
+  _authCtxCache = {
+    baseUrl: (s.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl).replace(/\/$/, ''),
+    jwtToken: s.jwtToken || '',
+    userId: s.telegramUserId || '',
+  }
+  _authCtxAt = Date.now()
+  return _authCtxCache
+}
+
+/**
+ * Fire a self-healing selector probe for `platform:action`, debounced per
+ * key and fully fire-and-forget. Called by executeLinkedInAction /
+ * executeXAction / executeRedditAction right before the action message is
+ * sent to the content script — so the probe runs against the same live DOM
+ * the action is about to use, but never blocks or breaks the action.
+ *
+ * Returns nothing (truly fire-and-forget). Any failure is caught inside.
+ */
+function maybeProbeActionSelector(tabId, platform, action, url) {
+  const selector = ACTION_SELECTORS[`${platform}:${action}`]
+  if (!selector) return            // no probe target for this action
+  if (!_shouldProbe(platform, action)) return   // debounced
+  _authCtx()
+    .then(({ baseUrl, jwtToken, userId }) =>
+      probeSelector(tabId, platform, action, selector, baseUrl, jwtToken, userId, url)
+    )
+    .catch((err) => console.debug('[Engagr] probe action selector skipped:', err.message))
 }
 
 /**
