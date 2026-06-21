@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { api } from '../App'
 import ControlCenter from './ControlCenter'
 import LinkedInSettings from './LinkedInSettings'
 import RedditSettings from './RedditSettings'
@@ -139,6 +140,26 @@ export default function Settings({ userId, settings, language = 'en', onSettings
               post → Feed → variants → approve → extension flow is stable end-to-end.
             </p>
           </div>
+
+          {/* Stage 3/4/5 tooling — reachable from Advanced */}
+          <div className="card mb-4">
+            <p className="text-sm font-semibold mb-2">🧭 Stage tools</p>
+            <div className="flex flex-col gap-2">
+              <button className="btn btn-sm text-left" onClick={() => onNavigate?.('analytics')}>
+                📊 Analytics funnel — found → published → CTR → AI cost
+              </button>
+              <button className="btn btn-sm text-left" onClick={() => onNavigate?.('selfhealing')}>
+                🩺 Selector health — self-healing + AI proposals
+              </button>
+            </div>
+          </div>
+
+          {/* Stage 3 — relevance filtering controls */}
+          <RelevancePanel userId={userId} onSettingsUpdate={onSettingsUpdate} settings={settings} />
+
+          {/* Browser MCP — Playwright tunnel on the user's PC */}
+          <McpPanel userId={userId} />
+
           <IdeasEngine userId={userId} language={language} />
         </div>
       )}
@@ -158,6 +179,143 @@ function LimitCard({ title, rows }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ── Stage 3 — relevance filtering controls ─────────────────────────────────
+function RelevancePanel({ userId, onSettingsUpdate, settings }) {
+  const [filteringEnabled, setFilteringEnabled] = useState(settings?.filtering_enabled !== false)
+  const [minScore, setMinScore] = useState(settings?.min_relevance_score ?? 3.0)
+  const [saving, setSaving] = useState(false)
+
+  const save = useCallback(async (enabled, score) => {
+    setSaving(true)
+    try {
+      await api.put(`/api/relevance/${userId}`, {
+        filtering_enabled: enabled,
+        min_relevance_score: score,
+      })
+      onSettingsUpdate?.({ filtering_enabled: enabled, min_relevance_score: score })
+    } catch (err) {
+      console.error('relevance save failed', err)
+    } finally {
+      setSaving(false)
+    }
+  }, [userId, onSettingsUpdate])
+
+  return (
+    <div className="card mb-4">
+      <p className="text-sm font-semibold mb-1">🎯 Relevance filtering (Stage 3)</p>
+      <p className="text-xs mb-3" style={{ color: 'var(--color-muted)' }}>
+        AI relevance score 0–10 + antispam + duplicate detection before a post reaches your Feed.
+      </p>
+
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm">Enable filtering</span>
+        <button
+          className="toggle-track"
+          role="switch"
+          aria-checked={filteringEnabled}
+          onClick={() => { const v = !filteringEnabled; setFilteringEnabled(v); save(v, minScore) }}
+        >
+          <span className={`toggle-track ${filteringEnabled ? 'active' : ''}`}>
+            <span className="toggle-knob" />
+          </span>
+        </button>
+      </div>
+
+      <div className="mb-2">
+        <div className="flex items-center justify-between text-xs mb-1">
+          <span style={{ color: 'var(--color-muted)' }}>Min relevance score</span>
+          <span className="font-semibold">{Number(minScore).toFixed(1)}</span>
+        </div>
+        <input
+          type="range" min="0" max="10" step="0.5"
+          value={minScore}
+          onChange={e => setMinScore(parseFloat(e.target.value))}
+          onMouseUp={e => save(filteringEnabled, parseFloat(e.target.value))}
+          onTouchEnd={e => save(filteringEnabled, parseFloat(e.target.value))}
+        />
+        <p className="text-[10px] mt-1" style={{ color: 'var(--color-muted)' }}>
+          Posts below this score are dropped. 0 = accept everything, 10 = only perfect matches.
+        </p>
+      </div>
+      {saving && <p className="text-[10px]" style={{ color: 'var(--color-muted)' }}>Saving…</p>}
+    </div>
+  )
+}
+
+// ── Browser MCP — Playwright tunnel on the user's PC ───────────────────────
+function McpPanel({ userId }) {
+  const [status, setStatus] = useState(null)
+  const [tools, setTools] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const checkStatus = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const s = await api.get('/api/mcp/status')
+      setStatus(s)
+      if (s.tunnel_ok) {
+        const t = await api.get('/api/mcp/tools')
+        setTools(t)
+      } else {
+        setTools(null)
+      }
+    } catch (err) {
+      setError(err.message || 'MCP status failed')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { checkStatus() }, [checkStatus])
+
+  return (
+    <div className="card mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-semibold">🌐 Browser MCP (Playwright tunnel)</p>
+        <button className="btn btn-sm" onClick={checkStatus} disabled={loading}>↻</button>
+      </div>
+      <p className="text-xs mb-3" style={{ color: 'var(--color-muted)' }}>
+        Run on your PC so the Railway backend can drive your real browser for self-healing:
+      </p>
+      <pre className="text-[10px] p-2 rounded mb-3 overflow-x-auto" style={{ background: '#0f172a', color: '#a5b4fc' }}>
+{`npx @playwright/mcp@latest --port 8931
+C:\\cloudflared\\cloudflared.exe tunnel --url http://localhost:8931`}
+      </pre>
+      <p className="text-[11px] mb-3" style={{ color: 'var(--color-muted)' }}>
+        Set <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: 4 }}>BROWSER_MCP_URL</code> on Railway to your trycloudflare URL.
+      </p>
+
+      {error && <p className="text-xs mb-2" style={{ color: 'var(--color-danger)' }}>{error}</p>}
+
+      {status && (
+        <div className="flex items-center gap-2 text-xs mb-2">
+          <span style={{
+            width: 8, height: 8, borderRadius: 99,
+            background: status.tunnel_ok ? '#22c55e' : '#ef4444',
+          }} />
+          <span style={{ color: status.tunnel_ok ? '#15803d' : '#b91c1c', fontWeight: 600 }}>
+            {status.tunnel_ok ? 'Tunnel reachable' : 'Tunnel down'}
+          </span>
+          <span style={{ color: 'var(--color-muted)', marginLeft: 'auto' }}>
+            {status.configured ? 'env' : 'default'}
+          </span>
+        </div>
+      )}
+      {status?.tunnel_ok && tools?.ok && (
+        <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>
+          {tools.count} tools available · server: {status.server?.name || 'playwright-mcp'}
+        </p>
+      )}
+      {status && !status.tunnel_ok && (
+        <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>
+          {status.error || 'Start the tunnel on your PC, then refresh.'}
+        </p>
+      )}
     </div>
   )
 }

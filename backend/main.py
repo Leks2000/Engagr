@@ -14,7 +14,7 @@ import inspect
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote as urlquote
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -39,6 +39,10 @@ import user_memory
 import ideas_engine
 import twitter_bot
 import auth as auth_module
+import relevance_scorer
+import analytics_funnel
+import selector_healer
+import browser_mcp
 
 # ── Logging ───────────────────────────────────────────
 
@@ -848,8 +852,36 @@ def extension_posts_push():
         skipped = 0
         keyword_filtered = 0
         new_items = []
+        # Stage 3 counters — relevance filter / antispam / antiduplicates
+        dropped_low_relevance = 0
+        dropped_spam = 0
+        dropped_duplicate = 0
 
-        for raw in raw_posts:
+        # ── Stage 3: AI relevance score + antispam/antiduplicates + sort ──────
+        # Run the scorer over the whole batch BEFORE per-post AI generation so
+        # we never spend Groq quota on spam/low-relevance posts. The user can
+        # toggle this off via settings.filtering_enabled (default on).
+        filtering_enabled = settings.get("filtering_enabled", True)
+        min_relevance = float(settings.get("min_relevance_score", 3.0) or 3.0)
+        if filtering_enabled:
+            scored = relevance_scorer.filter_and_sort_posts(
+                raw_posts, settings, user_id, queue,
+                use_ai=False,           # keep posts/push cheap; heuristic only here
+                min_score=min_relevance,
+            )
+            iterable = scored["kept"]
+            dropped_low_relevance = sum(1 for d in scored["dropped"] if d["reason"] == "low_relevance")
+            dropped_spam = sum(1 for d in scored["dropped"] if d["reason"] == "spam")
+            dropped_duplicate = scored["duplicates"]
+            skipped += dropped_low_relevance + dropped_spam + dropped_duplicate
+            logger.info(
+                "Stage3 posts/push user=%s kept=%d dropped(low=%d spam=%d dup=%d)",
+                user_id, len(iterable), dropped_low_relevance, dropped_spam, dropped_duplicate,
+            )
+        else:
+            iterable = raw_posts
+
+        for raw in iterable:
             if not isinstance(raw, dict):
                 skipped += 1
                 continue
@@ -876,7 +908,8 @@ def extension_posts_push():
                 keyword_filtered += 1
                 continue
 
-            # Deduplicate by URL or first 120 chars of text
+            # Stage 3 already ran dedupe, but keep the URL-key fast path so we
+            # also handle the "incoming post has pre-generated variants" upgrade.
             dedup_key = post_url or post_text[:120]
             if dedup_key in existing_keys:
                 # If the incoming post has pre-generated AI variants, update the
@@ -931,6 +964,11 @@ def extension_posts_push():
                 "status": "new_post",   # will be upgraded to pending after AI
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "scanned_at": body.get("scanned_at", ""),
+                # Stage 3 — relevance score / antispam flags / content fingerprint
+                "relevance_score": raw.get("relevance_score"),
+                "relevance_flags": raw.get("relevance_flags") or [],
+                "content_fingerprint": raw.get("content_fingerprint") or "",
+                "sort_key": raw.get("sort_key"),
             }
 
             # ── 0.6 Use pre-generated variants OR auto-generate AI variants ────
@@ -991,8 +1029,10 @@ def extension_posts_push():
             _push_posts_to_telegram(user_id, new_items)
 
         logger.info(
-            "extension/posts/push user=%s pushed=%d skipped=%d keyword_filtered=%d",
+            "extension/posts/push user=%s pushed=%d skipped=%d keyword_filtered=%d "
+            "stage3_dropped(low=%d spam=%d dup=%d)",
             user_id, pushed, skipped, keyword_filtered,
+            dropped_low_relevance, dropped_spam, dropped_duplicate,
         )
         return jsonify({
             "ok": True,
@@ -1000,6 +1040,12 @@ def extension_posts_push():
             "skipped": skipped,
             "keyword_filtered": keyword_filtered,
             "user_id": user_id,
+            # Stage 3 — relevance/antispam/antiduplicate telemetry
+            "stage3": {
+                "dropped_low_relevance": dropped_low_relevance,
+                "dropped_spam": dropped_spam,
+                "dropped_duplicate": dropped_duplicate,
+            },
         })
 
     except Exception as e:
@@ -1057,6 +1103,95 @@ def get_queue(user_id):
 
         return jsonify(result)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Media proxy ──────────────────────────────────────────────────────────────
+# Social CDN hosts (media.licdn.com, pbs.twimg.com, preview.redd.it, …) block
+# hotlinking by Referer. When the Telegram Mini App webview tries to load
+# <img src="https://media.licdn.com/…"> directly, the CDN returns 403 and the
+# image silently fails. This endpoint fetches the asset server-side (with a
+# permissive Referer pointing at the source site) and streams it back with
+# permissive CORS + long cache headers, so the Mini App can render post
+# media inline without leaving Telegram.
+_ALLOWED_MEDIA_HOSTS = {
+    "media.licdn.com", "static.licdn.com", "media-exp1.licdn.com",
+    "media-exp2.licdn.com", "media-exp3.licdn.com",
+    "pbs.twimg.com", "video.twimg.com", "ton.twimg.com",
+    "preview.redd.it", "external-preview.redd.it", "i.redd.it", "v.redd.it",
+    "b.thumbs.redditmedia.com", "a.thumbs.redditmedia.com",
+}
+_MEDIA_REFERER_BY_HOST = {
+    "licdn.com": "https://www.linkedin.com/feed/",
+    "twimg.com": "https://x.com/",
+    "redd.it": "https://www.reddit.com/",
+    "redditmedia.com": "https://www.reddit.com/",
+}
+
+
+@api.route("/api/media/proxy", methods=["GET"])
+def media_proxy():
+    target = request.args.get("url", "").strip()
+    if not target:
+        return jsonify({"error": "url query param required"}), 400
+    # Validate scheme + host against an allow-list to prevent an open redirect / SSRF
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(target)
+    except Exception:
+        return jsonify({"error": "invalid url"}), 400
+    if parsed.scheme not in ("http", "https"):
+        return jsonify({"error": "only http/https allowed"}), 400
+    host = (parsed.hostname or "").lower()
+    # Allow-list by domain suffix so sub-CDN hosts (media-exp1.licdn.com,
+    # pbs.twimg.com, external-preview.redd.it, …) all pass while blocking
+    # arbitrary SSRF / open-redirect targets.
+    _ALLOWED_SUFFIXES = ("licdn.com", "twimg.com", "redd.it", "redditmedia.com")
+    if not host or not any(host == s or host.endswith("." + s) for s in _ALLOWED_SUFFIXES):
+        return jsonify({"error": "host not allowed"}), 403
+
+    referer = "https://www.linkedin.com/feed/"
+    for suffix, ref in _MEDIA_REFERER_BY_HOST.items():
+        if host.endswith(suffix):
+            referer = ref
+            break
+
+    try:
+        upstream = requests.get(
+            target,
+            headers={
+                "Referer": referer,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "image/*,video/*,*/*;q=0.8",
+            },
+            timeout=15,
+            stream=True,
+            allow_redirects=True,
+        )
+        if upstream.status_code != 200:
+            return jsonify({"error": f"upstream {upstream.status_code}"}), 502
+
+        content_type = upstream.headers.get("Content-Type", "application/octet-stream")
+        # Normalize the content type so the webview renders it correctly
+        if "image" not in content_type and "video" not in content_type:
+            content_type = "image/jpeg" if target.lower().endswith((".jpg", ".jpeg")) else content_type
+
+        def generate():
+            for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+
+        resp = _app.response_class(generate(), content_type=content_type)
+        resp.headers["Cache-Control"] = "public, max-age=86400, immutable"
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+    except requests.RequestException as e:
+        logger.warning("media_proxy fetch failed url=%s err=%s", target, e)
+        return jsonify({"error": "fetch failed"}), 502
+    except Exception as e:
+        logger.error("media_proxy error url=%s err=%s", target, e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -2673,6 +2808,188 @@ def run_flask():
     """Run Flask API in a separate thread."""
     port = int(os.environ.get("PORT", 5000))
     api.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Stage 3 — Relevance scoring control (read-only view per user)
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.route("/api/relevance/<user_id>", methods=["GET"])
+def relevance_status(user_id):
+    """Return the user's Stage 3 filtering settings + recent drop telemetry.
+
+    The Mini App Settings → Filtering panel reads this so the user can tune
+    `min_relevance_score` and toggle `filtering_enabled`.
+    """
+    try:
+        settings = storage.get_settings(user_id)
+        return jsonify({
+            "filtering_enabled": settings.get("filtering_enabled", True),
+            "min_relevance_score": settings.get("min_relevance_score", 3.0),
+            "auto_ai_relevance": settings.get("auto_ai_relevance", False),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/relevance/<user_id>", methods=["PUT"])
+def relevance_update(user_id):
+    """Update Stage 3 filtering settings."""
+    try:
+        data = request.get_json(silent=True) or {}
+        updates = {}
+        if "filtering_enabled" in data:
+            updates["filtering_enabled"] = bool(data["filtering_enabled"])
+        if "min_relevance_score" in data:
+            updates["min_relevance_score"] = float(data["min_relevance_score"])
+        if "auto_ai_relevance" in data:
+            updates["auto_ai_relevance"] = bool(data["auto_ai_relevance"])
+        storage.update_settings(user_id, updates)
+        return jsonify({"ok": True, **updates})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Stage 4 — Analytics funnel
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.route("/api/analytics/funnel/<user_id>", methods=["GET"])
+def analytics_funnel_route(user_id):
+    """Full engagement funnel: N found → M published → K declined/failed →
+    CTR → AI cost → action history.
+
+    Query: ?days=7 (1-90)
+    """
+    try:
+        days = int(request.args.get("days", 7))
+        return jsonify(analytics_funnel.build_funnel(user_id, days=days))
+    except Exception as e:
+        logger.error("analytics funnel error user=%s: %s", user_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Self-healing — selector probes + proposals
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.route("/api/extension/selector/probe", methods=["POST"])
+def selector_probe():
+    """Record a selector probe from the extension.
+
+    Body: { user_id, platform, action, selector, found, html_snippet, url, at }
+    If a selector fails N times in a row, a Groq-proposed replacement is
+    generated and returned immediately so the extension can retry.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        user_id = body.get("user_id") or ""
+        # Allow Bearer token to supply user_id
+        if not user_id:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                payload = auth_module.verify_token(auth_header[7:])
+                if payload:
+                    user_id = payload.get("sub", "")
+        if not user_id:
+            return jsonify({"error": "user_id required"}), 400
+        result = selector_healer.record_probe(user_id, body)
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        logger.error("selector probe error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/selector/health/<user_id>", methods=["GET"])
+def selector_health_route(user_id):
+    """Current selector health snapshot for the Mini App."""
+    try:
+        return jsonify(selector_healer.get_selector_health(user_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/selector/proposal/<user_id>/<proposal_id>/accept", methods=["POST"])
+def selector_proposal_accept(user_id, proposal_id):
+    """Accept a proposed replacement selector."""
+    try:
+        return jsonify(selector_healer.accept_proposal(user_id, proposal_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/extension/selector/proposal/<user_id>/<proposal_id>/reject", methods=["POST"])
+def selector_proposal_reject(user_id, proposal_id):
+    """Reject a proposed replacement selector."""
+    try:
+        return jsonify(selector_healer.reject_proposal(user_id, proposal_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Browser MCP — remote Playwright on the user's PC (via Cloudflare tunnel)
+# ════════════════════════════════════════════════════════════════════════════
+
+@api.route("/api/mcp/status", methods=["GET"])
+def mcp_status():
+    """Liveness probe for the user's Playwright MCP tunnel.
+
+    The user runs on their PC:
+        npx @playwright/mcp@latest --port 8931
+        C:\\cloudflared\\cloudflared.exe tunnel --url http://localhost:8931
+    and sets BROWSER_MCP_URL on Railway. This endpoint tells the Mini App
+    whether the tunnel is reachable right now.
+    """
+    try:
+        return jsonify(browser_mcp.status())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/mcp/tools", methods=["GET"])
+def mcp_tools():
+    """List the tools the Playwright MCP server exposes."""
+    try:
+        return jsonify(browser_mcp.list_tools())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/mcp/call", methods=["POST"])
+def mcp_call():
+    """Invoke an MCP tool by name.
+
+    Body: { "tool": "browser_navigate", "arguments": { "url": "..." } }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        tool = body.get("tool") or body.get("name") or ""
+        args = body.get("arguments") or {}
+        timeout = int(body.get("timeout", 60))
+        if not tool:
+            return jsonify({"error": "tool name required"}), 400
+        return jsonify(browser_mcp.call_tool(tool, args, timeout=timeout))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api.route("/api/mcp/verify-selector", methods=["POST"])
+def mcp_verify_selector():
+    """Self-healing verification: navigate to a real post URL in the user's
+    browser and test whether a proposed CSS selector matches an element.
+
+    Body: { "url": "...", "selector": "..." }
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        url = body.get("url") or ""
+        selector = body.get("selector") or ""
+        if not url or not selector:
+            return jsonify({"error": "url and selector required"}), 400
+        return jsonify(browser_mcp.verify_selector_on_page(url, selector))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 async def main():

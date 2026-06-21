@@ -497,6 +497,75 @@ async function reportExecutionStatus(task, status, baseUrl, jwtToken, userId, er
 }
 
 /**
+ * Stage 5 — Self-healing: report a selector probe to the backend.
+ *
+ * Every time the extension uses a DOM selector for an action (comment box,
+ * post button, like button…), it calls this with the node count it found.
+ * If a selector fails N times in a row, the backend asks Groq for a
+ * replacement and returns it here so the extension can retry immediately.
+ *
+ * This is fire-and-forget: probe reporting must NEVER block an action or
+ * break posting if the backend is unreachable.
+ */
+async function reportSelectorProbe(platform, action, selector, found, baseUrl, jwtToken, userId, htmlSnippet = '', url = '') {
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (jwtToken) headers['Authorization'] = `Bearer ${jwtToken}`
+    await fetch(`${baseUrl}/api/extension/selector/probe`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        user_id: userId,
+        platform,
+        action,
+        selector,
+        found,
+        html_snippet: (htmlSnippet || '').slice(0, 4000),
+        url,
+        at: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch (err) {
+    console.debug('[Engagr] selector probe report skipped:', err.message)
+  }
+}
+
+/**
+ * Wrap a querySelectorAll probe so the found-count is reported to the
+ * self-healing system. Returns the NodeList so callers can use it directly.
+ */
+async function probeSelector(tabId, platform, action, selector, baseUrl, jwtToken, userId, url = '') {
+  let found = 0
+  let snippet = ''
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (sel) => {
+        try {
+          const nodes = document.querySelectorAll(sel)
+          const first = nodes[0]
+          return {
+            found: nodes.length,
+            snippet: first ? first.outerHTML.slice(0, 4000) : document.body ? document.body.outerHTML.slice(0, 2000) : '',
+          }
+        } catch (e) {
+          return { found: 0, snippet: '' }
+        }
+      },
+      args: [selector],
+    })
+    found = result?.found || 0
+    snippet = result?.snippet || ''
+  } catch (e) {
+    found = 0
+  }
+  // Report async, do not await — never block the action
+  reportSelectorProbe(platform, action, selector, found, baseUrl, jwtToken, userId, snippet, url)
+  return found
+}
+
+/**
  * Update task status via API.
  */
 async function updateTaskStatus(taskId, status, baseUrl, jwtToken, userId) {

@@ -398,6 +398,8 @@ input[type="range"]::-moz-range-thumb {
 @keyframes fillBar{to{width:var(--target)}}
 .queue-skeleton{height:120px;border-radius:12px;background:linear-gradient(90deg,#ececec 20%,#f7f7f7 40%,#ececec 60%);background-size:200% 100%;animation:shimmer 1.2s linear infinite;transform:translate3d(0,0,0);will-change:background-position}
 @keyframes shimmer{to{background-position:-200% 0}}
+@keyframes mediaShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.media-preview img{background:#f1f5f9}
 .empty-state .empty-illu{font-size:48px;margin-bottom:10px;animation:floaty 2.6s ease-in-out infinite;transform:translate3d(0,0,0);will-change:transform}
 @keyframes floaty{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(0,-6px,0)}}
 .queue-title-animate{display:inline-block;animation:queueTitleIn .45s ease both}
@@ -901,4 +903,110 @@ button.control-card:hover {
   white-space: nowrap;
   font-size: 11px;
   color: #0f172a;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Card action buttons — a consistent, mobile-first button system.
+   These classes are used by Card.jsx (Approve / Decline / Invite / Edit /
+   Regen / Skip). Previously they were referenced but never defined, so the
+   primary actions rendered as bare browser-default buttons. They now share
+   one visual language: clear hierarchy, 44px tap targets, active feedback.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Primary action (Approve) — solid platform-colored fill */
+.queue-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  border: none;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+.queue-btn-primary:active { transform: scale(0.97); }
+.queue-btn-primary:disabled { cursor: not-allowed; filter: saturate(0.4); }
+
+/* Secondary action (Decline / Invite / Edit / Regen / Skip) — subtle outline */
+.queue-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 40px;
+}
+.queue-btn-secondary:active { transform: scale(0.96); }
+.queue-btn-secondary:hover { background: #f8fafc; border-color: #cbd5e1; }
+.queue-btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Compact square skip (the bare ✕) — kept minimal */
+.queue-btn-skip-small {
+  padding: 9px 11px;
+  color: #94a3b8 !important;
+  border-color: #e2e8f0 !important;
+  background: #fff !important;
+}
+.queue-btn-skip-small:hover { color: #ef4444 !important; border-color: #fecaca !important; background: #fef2f2 !important; }
+
+/* Container for the Like/Connect toggles + primary row + secondary row */
+.queue-card-actions-semi { margin-top: 12px; }
+
+/* Secondary actions row (Invite / Edit / Regen / Skip) — even-spaced strip */
+.queue-card-actions-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.queue-card-actions-row .queue-btn-secondary { padding: 9px 6px; font-size: 11.5px; }
+
+/* Expanded invite panel */
+.queue-card-invite {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+/* Inline translation shown beneath a comment variant */
+.queue-card-variant-translation {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  line-height: 1.4;
+  border-left: 2px solid #e2e8f0;
+  padding-left: 6px;
+}
+
+/* ── Media preview (used by MediaPreview.jsx) ──────────────────────── */
+.media-preview { -webkit-tap-highlight-color: transparent; }
+.media-fallback button:active { transform: scale(0.95); }
+
+/* ── Feed header polish ────────────────────────────────────────────── */
+.feed-lang-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 22px !important;
 }

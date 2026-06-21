@@ -85,6 +85,28 @@
     try { return new URL(raw, window.location.origin).toString() } catch (_) { return raw.startsWith('http') ? raw : '' }
   }
 
+  // Pick the best URL from an <img>, honoring lazy-load attributes and the
+  // highest-resolution candidate in srcset. LinkedIn lazy-loads post images
+  // via data-delayed-url / data-img-perf-url, so a plain getAttribute('src')
+  // often returns a placeholder or an empty string.
+  function imgBestUrl(img) {
+    const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || ''
+    if (srcset) {
+      const best = srcset.split(',')
+        .map(c => { const [u, w] = c.trim().split(/\s+/); const x = parseFloat((w || '').replace('w', '')) || 0; return { u, x } })
+        .sort((a, b) => b.x - a.x)[0]
+      if (best && best.u) return absUrl(best.u)
+    }
+    return absUrl(
+      img.getAttribute('src') ||
+      img.getAttribute('data-src') ||
+      img.getAttribute('data-delayed-url') ||
+      img.getAttribute('data-img-perf-url') ||
+      img.getAttribute('data-perf-url') ||
+      ''
+    )
+  }
+
   // Extract up to 6 media attachments (images / videos) from a post card.
   // Avatars and tiny icons are skipped by a size threshold.
   function extractMedia(card) {
@@ -94,7 +116,7 @@
       try {
         card.querySelectorAll(sel).forEach((img) => {
           if (!isVisible(img)) return
-          const url = absUrl(img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('srcset') || '')
+          const url = imgBestUrl(img)
           if (!url || seen.has(url)) return
           const rect = img.getBoundingClientRect()
           if (rect.width < 50 && rect.height < 50) return
@@ -112,11 +134,17 @@
             if (src && !seen.has(src)) { seen.add(src); media.push({ type: 'video', url: src, thumbnail: poster }) }
             else if (poster && !seen.has(poster)) { seen.add(poster); media.push({ type: 'video', url: '', thumbnail: poster }) }
           } else {
-            const poster = absUrl(node.querySelector('img')?.getAttribute('src') || '')
+            const poster = absUrl(node.querySelector('img')?.getAttribute('src') || node.querySelector('img')?.getAttribute('data-delayed-url') || '')
             if (poster && !seen.has(poster)) { seen.add(poster); media.push({ type: 'video', url: '', thumbnail: poster }) }
           }
         })
       } catch (_) {}
+    }
+    // Fallback: og:image meta tag (covers article/link posts with no inline img)
+    if (media.length === 0) {
+      const og = card.querySelector('meta[property="og:image"]') || document.querySelector('meta[property="og:image"], meta[name="og:image"]')
+      const ogUrl = absUrl(og?.getAttribute('content') || '')
+      if (ogUrl) { seen.add(ogUrl); media.push({ type: 'image', url: ogUrl }) }
     }
     return media.slice(0, 6)
   }

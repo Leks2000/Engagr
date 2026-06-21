@@ -1,7 +1,7 @@
 # Engagr — Project Plan (Source of Truth)
 
-> **Last updated:** 2026-06-19  
-> **Status:** Active development plan  
+> **Last updated:** 2026-06-19 (media proxy + visual pass iteration)
+> **Status:** Active development plan
 > **For AI agents:** Read this file before implementing features. Phases are ordered — do not skip Phase 0–1 unless explicitly asked. Check off tasks in this file when completed.
 
 ---
@@ -297,34 +297,103 @@ Feed status updates: approved → executing → published / failed
 - [x] **Browser Recorder** (`recorder.js`): every execution step is logged to `chrome.storage.local` (`execution_start → status_executing → step_done/failed → published/failed_terminal`) so any bug can be traced in under a minute. Popup can read/clear the log via `ENGAGR_GET_ACTION_LOG` / `ENGAGR_CLEAR_ACTION_LOG`.
 - [x] Dead code removed: `_post_item_delayed` (backend) and unused bulk handlers (`handleApproveAll`/`handleSkipAll`) + `approveAll`/`skipAll` i18n keys (Queue/Dashboard).
 
-### Stage 3 — Filtering after the MVP loop is reliable (deferred — after stability)
+### Stage 3 — Filtering: AI relevance + antispam/antiduplicates + sort ✅ (landed this iteration)
 
-- AI relevance score 0–10 before showing a post.
-- Smart filtering / anti-spam / duplicate detection.
-- Minimum engagement threshold.
-- Sort queue by importance.
+- [x] **AI relevance score 0–10** before showing a post (`backend/relevance_scorer.py`).
+  - Heuristic score (length, keyword match, engagement, media) blended with optional Groq 0–10 (`auto_ai_relevance` setting).
+  - Persisted on the queue item as `relevance_score`, `relevance_flags`, `sort_key`, `content_fingerprint`.
+- [x] **Antispam / antiduplicates**: spam patterns, promoted/ad detection, low-effort filter, content-fingerprint dedupe against the live queue.
+- [x] **Sort queue by importance** — `filter_and_sort_posts` orders kept posts by `sort_key` desc.
+- [x] Wired into `POST /api/extension/posts/push` (runs *before* AI generation so Groq quota is never spent on spam/low-relevance posts).
+- [x] User controls: `filtering_enabled` (toggle) + `min_relevance_score` (0–10 slider) via `GET/PUT /api/relevance/<user_id>` + Settings → Advanced → Relevance panel.
+- [x] Telemetry in the push response: `stage3.dropped_low_relevance / dropped_spam / dropped_duplicate`.
 
-> **Dependency:** only start once the LinkedIn + X + Reddit execution loop is confirmed stable end-to-end in production. The MVP loop (Stage 1 + 2) must hold first.
+### Stage 4 — Analytics funnel ✅ (landed this iteration)
 
-### Stage 4 — Analytics after execution is reliable (deferred)
+- [x] **Real funnel** (`backend/analytics_funnel.py`, `GET /api/analytics/funnel/<user_id>?days=N`):
+  *N found → M published → K declined/failed → CTR → AI cost → action history*.
+- [x] CTR = published / (published + declined + failed + skipped) — "of everything decided, what went live". Open/undecided reported separately so it doesn't penalize CTR.
+- [x] Per-platform breakdown + daily series (for the chart) + recent action history (50 cap).
+- [x] AI cost tracking: authoritative from `stats.ai_cost_usd` / `ai_tokens`, fallback per-item estimate from Groq pricing.
+- [x] Frontend: `frontend/src/screens/Analytics.jsx` — 4 funnel cards, per-platform cards, daily bar chart, AI cost panel, action history list. Window 1/7/30d. Reachable via Settings → Advanced → "Analytics funnel" and deep link `?screen=analytics`.
 
-- Real Dashboard (not stub): today's funnel — *N found → M published → K declined/failed → CTR → AI cost → action history*.
-- Published/failed conversion stats.
-- AI cost tracking per action.
+### Stage 5 — Automated testing & self-healing ✅ (harness + self-heal landed)
 
-> The current `Dashboard.jsx` shows live session logs, warm-up mode, analytics charts, and stat cards, but the full funnel (declined/skipped counts, CTR, AI cost) is Stage 4 work.
-
-### Stage 5 — Automated testing & self-healing (✅ harness landed this iteration)
-
-- [x] **Playwright auto-test harness** (`tests/e2e/`): drives the Mini App in Chromium fully offline. A mock backend (`fixtures.js`) mirrors the real API (settings, queue, regenerate/select/approve/skip/decline, translate-all) so tests run with no Railway/Telegram/extension.
+- [x] **Playwright auto-test harness** (`tests/e2e/`): drives the Mini App in Chromium fully offline. A mock backend (`fixtures.js`) mirrors the real API (settings, queue, regenerate/select/approve/skip/decline, translate-all, media proxy) so tests run with no Railway/Telegram/extension.
   - `feed.spec.js`: render items · generate variants for `new_post` · select variant + Approve flips status · Decline updates badge · status chip counts.
-  - `media.spec.js`: inline `MediaPreview` image renders and actually decodes (guards the Telegram-media feature).
-  - `action-selectors.spec.js`: LinkedIn/X/Reddit selector regression guards against saved fixture HTML — catches platform UI drift before posting breaks in prod. **10/10 tests passing.**
-- [ ] Record-selector self-healing: auto-detect a broken selector and propose the new one (next iteration — fixture-driven guard already in place).
-- Run with `cd tests/e2e && npm install && npm run install:browsers && npm test`.
+  - `media.spec.js`: inline `MediaPreview` image renders through `/api/media/proxy` and actually decodes · **graceful "Media unavailable — Retry" fallback** appears on a simulated CDN 403 (guards the hotlink-bypass fix).
+  - `action-selectors.spec.js`: LinkedIn/X/Reddit selector regression guards against saved fixture HTML — catches platform UI drift before posting breaks in prod.
+- [x] **Record-selector self-healing** (`backend/selector_healer.py`):
+  - Extension reports every selector probe (`found` node count + surrounding HTML snippet) to `POST /api/extension/selector/probe`.
+  - After N consecutive failures (default 3), Groq proposes a replacement selector from the HTML snippet; the proposal is stored and surfaced in the Mini App for Accept/Reject.
+  - `GET /api/extension/selector/health/<user_id>` → `frontend/src/screens/SelfHealing.jsx` (summary, per-selector status, pending AI proposals with Accept/Reject, recent probe log).
+  - `POST /api/extension/selector/proposal/<user_id>/<id>/accept|reject` applies the new selector.
+- Run with `cd tests/e2e && npm install && npx playwright install chromium && npm test`.
+
+#### How "Browser MCP / Stage 5" works (plain explanation)
+
+Two layers:
+
+1. **Playwright auto-test harness (shipped, `tests/e2e/`)** — a headless Chromium that loads the Mini App against a *mock* backend (no Railway, no Telegram, no extension needed). After every code change you run `npm test` and it verifies the full UI loop: posts render → generate variants → select → approve → decline → status badges → media preview → selector regression. This catches regressions in seconds, offline. That is the "ИИ сам запускает приложение, жмёт кнопки, ищет ошибки, делает отчёт" piece — it is real and runs in this repo today.
+
+2. **Browser MCP (shipped this iteration, `backend/browser_mcp.py`)** — an MCP client that lets the Railway backend drive the user's *real* browser through a Cloudflare tunnel, for self-healing verification on the live DOM (see Stage 6).
+
+### Stage 6 — Browser MCP integration ✅ (landed this iteration)
+
+The user runs a Playwright MCP server on their PC and exposes it via a Cloudflare tunnel so the Railway backend can drive their real browser for self-healing verification and live DOM checks.
+
+**On the user's PC (Windows / PowerShell):**
+```powershell
+# 1. Start the Playwright MCP server on a local port
+npx @playwright/mcp@latest --port 8931
+
+# 2. Expose it via cloudflared (separate terminal)
+C:\cloudflared\cloudflared.exe tunnel --url http://localhost:8931
+```
+cloudflared prints a `https://<random>.trycloudflare.com` URL. Set it on Railway as `BROWSER_MCP_URL` (e.g. `https://tech-appropriate-golden-benchmark.trycloudflare.com/mcp`).
+
+**On Railway:**
+- `BROWSER_MCP_URL` env var → read live by `backend/browser_mcp.py`.
+- Backend endpoints:
+  - `GET  /api/mcp/status` — tunnel liveness probe.
+  - `GET  /api/mcp/tools` — list Playwright MCP tools.
+  - `POST /api/mcp/call` — invoke a tool (`{ "tool": "browser_navigate", "arguments": {...} }`).
+  - `POST /api/mcp/verify-selector` — self-heal verification (`{ "url", "selector" }`).
+- Frontend: Settings → Advanced → "Browser MCP (Playwright tunnel)" panel shows tunnel status, tool count, and the PC commands to run.
+
+**How it fits together:**
+```
+User PC                              Railway backend
+────────                             ──────────────
+npx @playwright/mcp (port 8931)      browser_mcp.py ── /api/mcp/*
+        │                                   │
+        ▼                                   ▼
+cloudflared tunnel ── HTTPS ───────► JSON-RPC 2.0 over HTTP+SSE
+        │                                   │
+        ▼                                   ▼
+Real Chrome (user's session)         self-heal: verify a proposed
+                                     selector on the live post DOM
+```
+Every MCP call degrades gracefully when the tunnel is down (PC off) — the rest of the app keeps working.
 
 ### Deferred / legacy areas
 
 - `backend/queue_executor.py` remains legacy server-side execution and should not be used for LinkedIn/X publishing.
 - Ideas Engine stays under Settings → Advanced, not main navigation.
-- Dashboard/analytics screens are not part of the main navigation until Stage 4.
+- `Dashboard.jsx` (legacy session-log view) is superseded by `Analytics.jsx` (Stage 4 funnel); kept for warm-up/live-log view.
+
+---
+
+## Iteration log — 2026-06-19 (media proxy + visual pass)
+
+**Root cause found:** the media pipeline (parser → backend → GET /api/queue → MediaPreview) was *not* broken — `media[]` was flowing through. The real reason post images/videos did not show in the Telegram Mini App was **CDN hotlink protection**: `media.licdn.com`, `pbs.twimg.com`, `preview.redd.it` return 403 when the Mini App webview loads `<img src="…cdn…">` directly (wrong Referer), and `MediaPreview` then **silently vanished** (`onError → return null`), so the user saw empty cards and assumed it was broken.
+
+**What shipped this iteration:**
+
+- **`/api/media/proxy` (backend)** — server-side fetch of social-CDN assets with a permissive Referer (linkedin.com / x.com / reddit.com by host suffix), streamed back with `Cache-Control: public, max-age=86400` + permissive CORS. Domain-suffix allow-list (`licdn.com`, `twimg.com`, `redd.it`, `redditmedia.com`) blocks SSRF/open-redirect abuse.
+- **`MediaPreview.jsx` rewrite (frontend)** — every asset is routed through the proxy; added a shimmer skeleton (never blank while loading), a gallery with prev/next + counter for multi-attachment posts, and a graceful **"Media unavailable — Retry"** chip that replaces the silent-disappear-on-error behaviour. `API_BASE` is now exported from `App.jsx` so the proxy URL is built correctly in any deployment.
+- **Parser hardening (extension)** — `linkedin_parser.js` / `x_parser.js` / `reddit_parser.js` now read lazy-load attributes (`data-delayed-url`, `data-img-perf-url`, `data-perf-url`, `data-srcset`) and pick the highest-resolution `srcset` candidate, plus fall back to `og:image` meta. Captures the real CDN URL even before the image decodes on the social site.
+- **Visual pass (frontend CSS)** — discovered that the primary Card action classes (`queue-btn-primary`, `queue-btn-secondary`, `queue-card-actions-semi/row`, `queue-btn-skip-small`, `queue-card-invite`, `queue-card-variant-translation`) were **referenced in `Card.jsx` but never defined in `index.css`**, so Approve/Decline/Invite/Edit/Regen rendered as bare browser-default buttons. Added a consistent, mobile-first button system (44px tap targets, clear primary/secondary hierarchy, active feedback) + `feed-lang-select` styling. Feed header refresh button slimmed to an icon.
+- **E2E** — `media.spec.js` extended with a regression test for the graceful fallback (simulated 403 → "Media unavailable — Retry" chip visible); mock backend gained a `proxyFails` flag + `page.route` fulfilment for the proxy image request (the `<img>` loader bypasses `window.fetch`). **11/11 tests passing.**
+
+**Verification:** `ast.parse` clean · `vite build` 391 modules exit 0 · `node -c` clean on all three parsers · Playwright 11/11.

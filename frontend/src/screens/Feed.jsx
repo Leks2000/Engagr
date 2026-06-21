@@ -307,7 +307,7 @@ export default function Feed({ userId, language = 'en', onLanguageChange }) {
             <select
               value={language}
               onChange={(e) => onLanguageChange(e.target.value)}
-              className="text-xs rounded-lg border px-2 py-1.5"
+              className="feed-lang-select text-xs rounded-lg border px-2 py-1.5"
               style={{ borderColor: '#e5e7eb', background: '#fff', color: '#334155', cursor: 'pointer' }}
               title="Display language"
             >
@@ -317,7 +317,12 @@ export default function Feed({ userId, language = 'en', onLanguageChange }) {
               <option value="de">DE</option>
             </select>
           )}
-          <button className="btn btn-sm" onClick={loadFeed} disabled={refreshing}>↻ Refresh</button>
+          <button
+            className="btn btn-sm"
+            onClick={loadFeed}
+            disabled={refreshing}
+            style={{ opacity: refreshing ? 0.6 : 1 }}
+          >↻</button>
         </div>
       </div>
 

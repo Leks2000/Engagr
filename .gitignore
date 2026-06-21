@@ -28,3 +28,7 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright generated artifacts
+tests/e2e/test-results/
+tests/e2e/playwright-report/

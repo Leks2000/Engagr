@@ -9,6 +9,8 @@ import Feed from './screens/Feed'
 import Queue from './screens/Queue'
 import Settings from './screens/Settings'
 import UserMemory from './screens/UserMemory'
+import AnalyticsScreen from './screens/Analytics'
+import SelfHealing from './screens/SelfHealing'
 
 const tg = window.Telegram?.WebApp
 const urlParams = new URLSearchParams(window.location.search)
@@ -16,7 +18,7 @@ const userIdFromQuery = urlParams.get('user_id')
 const userIdFromStorage = window.localStorage.getItem('engagr_user_id')
 const userId = tg?.initDataUnsafe?.user?.id?.toString() || userIdFromQuery || userIdFromStorage || 'dev_user'
 window.localStorage.setItem('engagr_user_id', userId)
-const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
+export const API_BASE = import.meta.env.VITE_API_URL || 'https://engagr-production.up.railway.app'
 
 // Auto-detect language from Telegram user settings
 const SUPPORTED_LANGS = ['en', 'ru', 'es', 'de']
@@ -220,11 +222,11 @@ function App() {
       window.history.replaceState({}, '', '/')
       loadSettings().then(() => setScreen('settings'))
     }
-    // Deep link: ?screen=feed|queue|settings|profile opens the target tab directly.
+    // Deep link: ?screen=feed|queue|settings|profile|analytics|selfhealing opens the target tab directly.
     const screenParam = params.get('screen')
-    const legacyMap = { dashboard: 'feed', linkedin: 'settings', reddit: 'settings', more: 'settings', memory: 'profile', ideas: 'settings', x: 'settings' }
+    const legacyMap = { dashboard: 'analytics', linkedin: 'settings', reddit: 'settings', more: 'settings', memory: 'profile', ideas: 'settings', x: 'settings' }
     const mappedScreen = legacyMap[screenParam] || screenParam
-    if (mappedScreen && ['feed', 'queue', 'settings', 'profile'].includes(mappedScreen)) {
+    if (mappedScreen && ['feed', 'queue', 'settings', 'profile', 'analytics', 'selfhealing'].includes(mappedScreen)) {
       window.history.replaceState({}, '', '/')
       setScreen(mappedScreen)
     }
@@ -264,6 +266,8 @@ function App() {
             {screen === 'queue' && <div className="page-transition"><Queue userId={userId} language={language} /></div>}
             {screen === 'settings' && <div className="page-transition"><Settings userId={userId} settings={settings} language={language} onSettingsUpdate={handleSettingsUpdate} onNavigate={setScreen} /></div>}
             {screen === 'profile' && <div className="page-transition"><UserMemory userId={userId} language={language} /></div>}
+            {screen === 'analytics' && <div className="page-transition"><AnalyticsScreen userId={userId} language={language} /></div>}
+            {screen === 'selfhealing' && <div className="page-transition"><SelfHealing userId={userId} language={language} /></div>}
           </motion.div>
         </AnimatePresence>
       </main>

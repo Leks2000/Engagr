@@ -77,6 +77,28 @@
   // ── Media extraction (shared by old + new Reddit) ────────────────────────
   // Pulls up to 6 image / video attachments. Skips subreddit logos / avatars
   // via a small size threshold and an allow-list of gallery/post containers.
+  // Also reads lazy-load attributes (data-src, data-delayed-url, data-perf-url,
+  // srcset) so the real CDN URL is captured even before the image decodes.
+  function imgBestUrl(img) {
+    // Prefer the highest-resolution candidate from srcset, then fall back to
+    // lazy attributes, then the regular src.
+    const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || ''
+    if (srcset) {
+      const best = srcset.split(',')
+        .map(c => { const [u, w] = c.trim().split(/\s+/); const x = parseFloat((w || '').replace('w', '')) || 0; return { u, x } })
+        .sort((a, b) => b.x - a.x)[0]
+      if (best && best.u) return absUrl(best.u)
+    }
+    return absUrl(
+      img.getAttribute('src') ||
+      img.getAttribute('data-src') ||
+      img.getAttribute('data-delayed-url') ||
+      img.getAttribute('data-perf-url') ||
+      img.getAttribute('data-img-perf-url') ||
+      ''
+    )
+  }
+
   function extractMediaFrom(root, isOld) {
     const media = []
     const seen = new Set()
@@ -85,12 +107,12 @@
     if (isOld) {
       // Old Reddit: .thumbnail img, gallery img, video embed
       root.querySelectorAll('.thumbnail img, a.thumbnail img').forEach((img) => {
-        const url = absUrl(img.getAttribute('src') || '')
+        const url = imgBestUrl(img)
         const rect = img.getBoundingClientRect()
         if (url && rect.width >= 50) push({ type: 'image', url })
       })
       root.querySelectorAll('img.title').forEach((img) => {
-        const url = absUrl(img.getAttribute('src') || '')
+        const url = imgBestUrl(img)
         if (url) push({ type: 'image', url })
       })
       // Old Reddit video: <video> inside the thing, or preview.redd.it poster
@@ -102,7 +124,7 @@
     } else {
       // New Reddit / shreddit
       root.querySelectorAll('img[data-testid="post-image"], img.post-image, gallery-carousel img, shreddit-post img').forEach((img) => {
-        const url = absUrl(img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('srcset') || '')
+        const url = imgBestUrl(img)
         const rect = img.getBoundingClientRect()
         if (url && (rect.width >= 60 || !rect.width)) push({ type: 'image', url })
       })
@@ -113,9 +135,15 @@
       })
       // shreddit-gallery / media-preview slot
       root.querySelectorAll('[slot="post-media-content"] img, [data-testid="post-content"] img').forEach((img) => {
-        const url = absUrl(img.getAttribute('src') || img.getAttribute('srcset') || '')
+        const url = imgBestUrl(img)
         if (url) push({ type: 'image', url })
       })
+    }
+    // Fallback: og:image meta tag (covers link posts / embeds with no inline img)
+    if (media.length === 0) {
+      const og = document.querySelector('meta[property="og:image"], meta[name="og:image"]')
+      const ogUrl = absUrl(og?.getAttribute('content') || '')
+      if (ogUrl) push({ type: 'image', url: ogUrl })
     }
     return media.slice(0, 6)
   }
