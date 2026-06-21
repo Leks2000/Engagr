@@ -28,6 +28,7 @@ const STATUS_META = {
 
 const PLATFORM_LABELS = { x: 'X', reddit: 'Reddit', linkedin: 'LinkedIn' }
 const PLATFORM_COLORS = { linkedin: '#0A66C2', reddit: '#FF4500', x: '#111827' }
+const CTR_TARGET = 0.60
 
 function pct(n) {
   if (n == null || isNaN(n)) return '0%'
@@ -65,6 +66,7 @@ export default function Analytics({ userId, language = 'en' }) {
   const platforms = data?.platforms || {}
   const daily = data?.daily || []
   const history = data?.action_history || []
+  const ctrBelowTarget = Number(funnel.ctr || 0) < CTR_TARGET
 
   // ── Daily chart scale ───────────────────────────────────────────────────
   const maxDaily = useMemo(() => {
@@ -127,8 +129,8 @@ export default function Analytics({ userId, language = 'en' }) {
               sub={`${funnel.executing || 0} executing`} />
             <FunnelCard label="Declined + Failed" value={(funnel.declined || 0) + (funnel.failed || 0)} icon="✕" color="#b91c1c"
               sub={`${funnel.declined || 0} declined · ${funnel.failed || 0} failed`} />
-            <FunnelCard label="CTR" value={pct(funnel.ctr)} icon="📈" color="#0A66C2"
-              sub={`success ${pct(funnel.success_rate)}`} />
+            <FunnelCard label="CTR" value={pct(funnel.ctr)} icon="📈" color={ctrBelowTarget ? '#b91c1c' : '#0A66C2'}
+              sub={`target ${pct(CTR_TARGET)} · success ${pct(funnel.success_rate)}`} danger={ctrBelowTarget} />
           </div>
 
           {/* ── AI cost panel ───────────────────────────────────────────── */}
@@ -256,9 +258,13 @@ export default function Analytics({ userId, language = 'en' }) {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-function FunnelCard({ label, value, icon, color, sub }) {
+function FunnelCard({ label, value, icon, color, sub, danger = false }) {
   return (
-    <div className="queue-card" style={{ borderLeft: `4px solid ${color}` }}>
+    <div className="queue-card" style={{
+      borderLeft: `4px solid ${color}`,
+      background: danger ? '#fff1f2' : '#fff',
+      borderColor: danger ? '#fecaca' : undefined,
+    }}>
       <div className="flex items-center gap-2 mb-1">
         <span style={{ fontSize: 14 }}>{icon}</span>
         <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#64748b' }}>{label}</span>

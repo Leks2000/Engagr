@@ -250,6 +250,8 @@ function McpPanel({ userId }) {
   const [tools, setTools] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [e2eLoading, setE2eLoading] = useState(false)
+  const [e2eResult, setE2eResult] = useState(null)
 
   const checkStatus = useCallback(async () => {
     setLoading(true); setError('')
@@ -270,6 +272,20 @@ function McpPanel({ userId }) {
   }, [])
 
   useEffect(() => { checkStatus() }, [checkStatus])
+
+  const runE2e = async () => {
+    setE2eLoading(true); setError(''); setE2eResult(null)
+    try {
+      const res = await api.post('/api/mcp/e2e', {})
+      setE2eResult(res)
+    } catch (err) {
+      setError(err.message || 'MCP e2e failed')
+    } finally {
+      setE2eLoading(false)
+    }
+  }
+
+  const e2ePassed = e2eResult?.ok === true || e2eResult?.passed === true
 
   return (
     <div className="card mb-4">
@@ -309,6 +325,21 @@ C:\\cloudflared\\cloudflared.exe tunnel --url http://localhost:8931`}
           {tools.count} tools available · server: {status.server?.name || 'playwright-mcp'}
         </p>
       )}
+
+      <div className="mt-3 pt-3" style={{ borderTop: '1px solid #f1f5f9' }}>
+        <button className="btn btn-sm w-full" onClick={runE2e} disabled={e2eLoading}>
+          {e2eLoading ? 'Running e2e…' : '▶ Run e2e now'}
+        </button>
+        {e2eResult && (
+          <div className="mt-2 px-3 py-2 rounded-xl text-xs" style={e2ePassed
+            ? { background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }
+            : { background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }}>
+            <b>{e2ePassed ? 'Pass' : 'Fail'}</b>
+            {Array.isArray(e2eResult.results) && ` · ${e2eResult.results.filter(r => r.ok || r.passed).length}/${e2eResult.results.length} scenarios passed`}
+            {e2eResult.error && ` · ${e2eResult.error}`}
+          </div>
+        )}
+      </div>
       {status && !status.tunnel_ok && (
         <p className="text-[11px]" style={{ color: 'var(--color-muted)' }}>
           {status.error || 'Start the tunnel on your PC, then refresh.'}

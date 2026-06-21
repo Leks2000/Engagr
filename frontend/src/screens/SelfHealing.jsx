@@ -26,6 +26,18 @@ function fmt(ts) {
   try { return new Date(ts).toLocaleString() } catch { return ts }
 }
 
+
+function proposalPreview(p) {
+  if (p.preview?.match_count != null) return p.preview
+  if (!p.html_snippet || !p.new_selector || typeof window === 'undefined') return null
+  try {
+    const doc = new DOMParser().parseFromString(p.html_snippet, 'text/html')
+    return { ok: true, match_count: doc.querySelectorAll(p.new_selector).length }
+  } catch (err) {
+    return { ok: false, match_count: 0, reason: err.message }
+  }
+}
+
 export default function SelfHealing({ userId, language = 'en' }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -119,8 +131,11 @@ export default function SelfHealing({ userId, language = 'en' }) {
             <>
               <h2 className="text-sm font-bold mb-2" style={{ color: '#0f172a' }}>AI proposals (pending review)</h2>
               <div className="space-y-2 mb-4">
-                {proposals.filter(p => p.status === 'pending').map(p => (
-                  <div key={p.id} className="queue-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+                {proposals.filter(p => p.status === 'pending').map(p => {
+                  const preview = proposalPreview(p)
+                  const previewBad = preview && (preview.match_count === 0 || preview.match_count > 3 || preview.ok === false)
+                  return (
+                  <div key={p.id} className="queue-card" style={{ borderLeft: previewBad ? '4px solid #b91c1c' : '4px solid #7c3aed' }}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold" style={{ color: '#7c3aed' }}>
                         {p.platform} · {p.action}
@@ -142,6 +157,14 @@ export default function SelfHealing({ userId, language = 'en' }) {
                         {p.new_selector}
                       </code>
                     </div>
+                    {preview && (
+                      <div className="mb-2 px-2 py-1.5 rounded-lg text-[11px]" style={previewBad
+                        ? { background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }
+                        : { background: '#ecfdf5', color: '#047857', border: '1px solid #bbf7d0' }}>
+                        Preview on saved HTML: <b>matches {preview.match_count}</b>
+                        {preview.reason && <span> · {preview.reason}</span>}
+                      </div>
+                    )}
                     {p.reason && (
                       <p className="text-[11px] mb-2" style={{ color: '#64748b', fontStyle: 'italic' }}>{p.reason}</p>
                     )}
@@ -156,7 +179,7 @@ export default function SelfHealing({ userId, language = 'en' }) {
                       </button>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             </>
           )}

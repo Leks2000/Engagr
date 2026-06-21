@@ -891,6 +891,37 @@ async def send_new_post_cards(user_id: str, items: list):
             pass
 
 
+async def send_self_healing_alert(user_id: str, proposal: dict):
+    """Notify user when Groq proposes a selector-healing fix."""
+    app = _bot_app
+    if not app:
+        logger.error("send_self_healing_alert: bot not initialized")
+        return
+
+    platform = (proposal.get("platform") or "platform").title()
+    action = (proposal.get("action") or "selector").replace("_", " ")
+    selector = (proposal.get("new_selector") or proposal.get("selector") or "")[:160]
+    confidence = proposal.get("confidence", 0)
+    text = (
+        f"🩺 *{platform} {action} selector broke*\n\n"
+        "Groq proposed a fix — review it in Self-healing before Accept.\n"
+        f"Confidence: *{confidence}%*\n"
+        f"Selector: `{selector}`"
+    )
+    keyboard = None
+    if MINI_APP_URL:
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("Review proposal", web_app=WebAppInfo(url=f"{MINI_APP_URL}?screen=selfhealing"))
+        ]])
+    await app.bot.send_message(
+        chat_id=int(user_id),
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+    )
+
+
 async def send_execution_status(user_id: str, item: dict, status: str, error_msg: str = ""):
     """
     Notify user about comment execution result (published/failed).

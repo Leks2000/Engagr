@@ -2911,6 +2911,12 @@ def selector_probe():
         if not user_id:
             return jsonify({"error": "user_id required"}), 400
         result = selector_healer.record_probe(user_id, body)
+        proposal = result.get("proposal") or {}
+        if proposal.get("selector") and _loop:
+            asyncio.run_coroutine_threadsafe(
+                telegram_bot.send_self_healing_alert(user_id, {**proposal, "platform": body.get("platform"), "action": body.get("action")}),
+                _loop,
+            )
         return jsonify({"ok": True, **result})
     except Exception as e:
         logger.error("selector probe error: %s", e)
