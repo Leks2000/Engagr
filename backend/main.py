@@ -2992,6 +2992,28 @@ def mcp_verify_selector():
         return jsonify({"error": str(e)}), 500
 
 
+@api.route("/api/mcp/e2e", methods=["POST"])
+def mcp_run_e2e():
+    """Agent-facing e2e runner — runs the existing tests/e2e Playwright
+    scenarios through the user's Playwright MCP tunnel (on the remote PC
+    browser) and returns structured pass/fail per test + logs.
+
+    Body (all optional):
+        { "scenarios": ["action_selectors","feed","media"],  # default: all
+          "mini_app_url": "https://..." }                    # default: env
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        scenarios = body.get("scenarios")
+        mini_app_url = body.get("mini_app_url")
+        if scenarios is not None and not isinstance(scenarios, list):
+            return jsonify({"error": "scenarios must be a list"}), 400
+        return jsonify(browser_mcp.run_e2e(scenarios=scenarios, mini_app_url=mini_app_url))
+    except Exception as e:
+        logger.error("mcp e2e error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 async def main():
     global _loop
     _loop = asyncio.get_event_loop()
