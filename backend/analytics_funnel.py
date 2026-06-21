@@ -168,6 +168,18 @@ def build_funnel(user_id: str, days: int = 7) -> dict:
                 est += _estimate_item_ai_cost(q)
         ai_cost_usd = round(est, 4)
 
+    # ── Groq calls saved by the Stage 3 filter ─────────────────────────────
+    # Each dropped post (spam/low_relevance/duplicate) is one the filter removed
+    # BEFORE it would have hit generate_comment_variants. We estimate the USD
+    # the filter saved so the Analytics AI-cost panel can show the value of the
+    # relevance gate. stats.groq_calls_saved is accumulated in posts/push.
+    groq_calls_saved = int(stats.get("groq_calls_saved", 0) or 0)
+    # Estimated saved cost: one variant-generation round-trip per saved call.
+    _SAVED_TOKENS_PER_CALL = 1950   # 3 variants ≈ 1950 tokens round-trip
+    _in = (_SAVED_TOKENS_PER_CALL * 0.6 / 1_000_000) * GROQ_PRICE_IN_PER_1M
+    _out = (_SAVED_TOKENS_PER_CALL * 0.4 / 1_000_000) * GROQ_PRICE_OUT_PER_1M
+    groq_cost_saved_usd = round(groq_calls_saved * (_in + _out), 4)
+
     # ── Per-platform summary ──────────────────────────────────────────────
     platforms = {}
     for plat, counter in by_platform_status.items():
@@ -219,6 +231,11 @@ def build_funnel(user_id: str, days: int = 7) -> dict:
         },
         "ai_cost_usd": ai_cost_usd,
         "ai_tokens": ai_tokens,
+        # Stage 3 filter value: Groq variant-generation calls the relevance gate
+        # removed before they could spend quota, + estimated USD saved. Shown in
+        # the Analytics AI-cost panel next to actual spend.
+        "groq_calls_saved": groq_calls_saved,
+        "groq_cost_saved_usd": groq_cost_saved_usd,
         "platforms": platforms,
         "daily": daily,
         "action_history": action_history,

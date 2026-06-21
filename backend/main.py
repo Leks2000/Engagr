@@ -863,10 +863,16 @@ def extension_posts_push():
         # toggle this off via settings.filtering_enabled (default on).
         filtering_enabled = settings.get("filtering_enabled", True)
         min_relevance = float(settings.get("min_relevance_score", 3.0) or 3.0)
+        # auto_ai_relevance (default ON): blend the heuristic score with a tiny
+        # Groq relevance call on the KEPT set only, for better Feed ordering.
+        # The spam/low-relevance drop happens on the heuristic first, so Groq is
+        # never spent on posts that will be filtered. See Task 2 decision notes
+        # in the commit for the cost/FP numbers behind this default.
+        auto_ai_relevance = settings.get("auto_ai_relevance", True)
         if filtering_enabled:
             scored = relevance_scorer.filter_and_sort_posts(
                 raw_posts, settings, user_id, queue,
-                use_ai=False,           # keep posts/push cheap; heuristic only here
+                use_ai=auto_ai_relevance,   # heuristic filter always; AI blend on kept when enabled
                 min_score=min_relevance,
             )
             iterable = scored["kept"]
@@ -874,9 +880,20 @@ def extension_posts_push():
             dropped_spam = sum(1 for d in scored["dropped"] if d["reason"] == "spam")
             dropped_duplicate = scored["duplicates"]
             skipped += dropped_low_relevance + dropped_spam + dropped_duplicate
+            # Record how many Groq variant-generation calls the filter saved so
+            # the Analytics AI-cost panel can show the saving. Each dropped post
+            # (spam/low_relevance/duplicate) is one that would otherwise have hit
+            # generate_comment_variants — the filter removes it BEFORE that spend.
+            groq_saved = dropped_low_relevance + dropped_spam + dropped_duplicate
+            if groq_saved > 0:
+                try:
+                    storage.increment_stat(user_id, "groq_calls_saved", groq_saved)
+                except Exception as _se:
+                    logger.debug("increment groq_calls_saved failed: %s", _se)
             logger.info(
-                "Stage3 posts/push user=%s kept=%d dropped(low=%d spam=%d dup=%d)",
-                user_id, len(iterable), dropped_low_relevance, dropped_spam, dropped_duplicate,
+                "Stage3 posts/push user=%s kept=%d dropped(low=%d spam=%d dup=%d) ai_blend=%s groq_saved=%d",
+                user_id, len(iterable), dropped_low_relevance, dropped_spam,
+                dropped_duplicate, auto_ai_relevance, groq_saved,
             )
         else:
             iterable = raw_posts
@@ -2826,7 +2843,7 @@ def relevance_status(user_id):
         return jsonify({
             "filtering_enabled": settings.get("filtering_enabled", True),
             "min_relevance_score": settings.get("min_relevance_score", 3.0),
-            "auto_ai_relevance": settings.get("auto_ai_relevance", False),
+            "auto_ai_relevance": settings.get("auto_ai_relevance", True),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
