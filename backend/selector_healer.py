@@ -62,6 +62,43 @@ _health_locks: dict[str, threading.Lock] = {}
 _health_global = threading.Lock()
 
 
+_BARE_TAG_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]*$")
+_BROAD_MATCH_LIMIT = 3
+
+
+def _selector_safety_check(selector: str, html_snippet: str = "") -> dict:
+    """Cheap guardrail for AI proposals before they reach Accept.
+
+    Reject selectors that are obviously too broad (for example plain `button`)
+    or that match too many nodes in the saved probe snippet. Live MCP verify is
+    still required on Accept; this just prevents risky proposals from being
+    shown as safe candidates.
+    """
+    sel = (selector or "").strip()
+    if not sel:
+        return {"ok": False, "reason": "empty selector", "match_count": 0}
+    if _BARE_TAG_RE.match(sel):
+        return {"ok": False, "reason": "selector is a bare tag name", "match_count": None}
+
+    if html_snippet:
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_snippet, "html.parser")
+            matches = soup.select(sel)
+            match_count = len(matches)
+            if match_count > _BROAD_MATCH_LIMIT:
+                return {
+                    "ok": False,
+                    "reason": f"selector matches too broadly in saved snippet ({match_count} nodes)",
+                    "match_count": match_count,
+                }
+            return {"ok": True, "reason": "", "match_count": match_count}
+        except Exception as e:
+            return {"ok": False, "reason": f"selector cannot be evaluated on saved snippet: {e}", "match_count": 0}
+
+    return {"ok": True, "reason": "", "match_count": None}
+
+
 def _lock(user_id: str) -> threading.Lock:
     with _health_global:
         if user_id not in _health_locks:
@@ -168,6 +205,18 @@ def record_probe(user_id: str, probe: dict) -> dict:
         if found == 0 and entry["consecutive_failures"] == _FAIL_THRESHOLD and snippet:
             proposal = propose_selector(platform, action, snippet)
             if proposal.get("selector"):
+                safety = _selector_safety_check(proposal["selector"], snippet)
+                if not safety.get("ok"):
+                    proposal = {
+                        **proposal,
+                        "selector": "",
+                        "rejected_by_safety": True,
+                        "safety": safety,
+                        "reason": safety.get("reason") or proposal.get("reason", ""),
+                    }
+                else:
+                    proposal["safety"] = safety
+            if proposal.get("selector"):
                 pr = {
                     "id": f"prop_{int(time.time())}_{platform}_{action}",
                     "platform": platform,
@@ -177,6 +226,7 @@ def record_probe(user_id: str, probe: dict) -> dict:
                     "confidence": proposal.get("confidence", 0),
                     "reason": proposal.get("reason", ""),
                     "html_snippet": snippet[:800],
+                    "preview": proposal.get("safety", {}),
                     # The page the probe ran on — accept_proposal navigates back
                     # here to validate the AI selector against the LIVE DOM (not
                     # the stale snippet) before it is trusted. Without this URL
