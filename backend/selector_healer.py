@@ -145,7 +145,12 @@ def record_probe(user_id: str, probe: dict) -> dict:
             entry["consecutive_successes"] += 1
             entry["last_success"] = at
         else:
-            entry["status"] = entry.get("consecutive_failures", 0) + 1 >= _FAIL_THRESHOLD and "broken" or "degraded"
+            # Was: `entry.get(...) + 1 >= _FAIL_THRESHOLD and "broken" or "degraded"`
+            # — an `X and STR or Y` ternary that works only because non-empty
+            # strings are truthy. Fragile and a readability trap. Replaced with
+            # an explicit if/else so the intent is unambiguous.
+            will_break = entry.get("consecutive_failures", 0) + 1 >= _FAIL_THRESHOLD
+            entry["status"] = "broken" if will_break else "degraded"
             entry["consecutive_failures"] += 1
             entry["consecutive_successes"] = 0
             entry["last_failure"] = at
@@ -172,8 +177,15 @@ def record_probe(user_id: str, probe: dict) -> dict:
                     "confidence": proposal.get("confidence", 0),
                     "reason": proposal.get("reason", ""),
                     "html_snippet": snippet[:800],
+                    # The page the probe ran on — accept_proposal navigates back
+                    # here to validate the AI selector against the LIVE DOM (not
+                    # the stale snippet) before it is trusted. Without this URL
+                    # live verification is impossible and a blind Accept could
+                    # silently break extraction.
+                    "verify_url": (probe.get("url") or "")[:500],
                     "created_at": at,
                     "status": "pending",   # pending | accepted | rejected
+                    "verified": None,      # None | {ok, matched, tag, text, checked_at}
                 }
                 data["proposals"].insert(0, pr)
                 data["proposals"] = data["proposals"][:_MAX_PROPOSALS_KEPT]
@@ -216,22 +228,143 @@ def get_selector_health(user_id: str) -> dict:
 
 # ── Public: accept a proposal ───────────────────────────────────────────────
 
+# How many nodes the proposed selector MUST match on the live DOM before we
+# trust an Accept. 1 is the minimum (the action needs one element); we don't
+# require more because some legitimate selectors (e.g. a unique id) match once.
+_VERIFY_MIN_MATCHES = 1
+
+
+def _verify_proposal_live(pr: dict) -> dict:
+    """Validate the proposed selector against the LIVE page DOM via the user's
+    Playwright MCP tunnel, NOT the stale snippet saved with the probe.
+
+    This is the self-healing safety gate: a Groq proposal that looks right but
+    is actually broken (generated class, wrong element, stale fixture) is caught
+    here before it silently breaks extraction. The user clicks Accept in the
+    Mini App → backend navigates the real browser to verify_url → checks the
+    selector resolves → only then does it ship.
+
+    Graceful degrade: if the tunnel is down (user's PC off) we do NOT silently
+    apply the selector. We return a `verify_unavailable` result so the Mini App
+    can tell the user to start the tunnel and retry. Applying an unverified AI
+    selector is exactly the silent-breakage risk self-healing exists to prevent.
+    """
+    verify_url = (pr.get("verify_url") or "").strip()
+    new_sel = pr.get("new_selector") or ""
+    if not verify_url or not new_sel:
+        return {
+            "ok": False,
+            "verified": False,
+            "verify_unavailable": True,
+            "error": "no verify_url on proposal — cannot validate on live DOM",
+        }
+    try:
+        import browser_mcp
+        res = browser_mcp.verify_selector_on_page(verify_url, new_sel, timeout=45)
+    except Exception as e:
+        logger.warning("verify_proposal_live import/call failed: %s", e)
+        return {"ok": False, "verified": False, "verify_unavailable": True, "error": str(e)}
+
+    # browser_mcp.verify_selector_on_page returns {ok, matched, tag, text, ...}
+    # or {ok:False, step, error} on a tunnel/transport failure.
+    if not res.get("ok"):
+        # Tunnel down / navigate failed → do NOT apply; surface to the user.
+        return {
+            "ok": False,
+            "verified": False,
+            "verify_unavailable": True,
+            "step": res.get("step", ""),
+            "error": res.get("error", "MCP tunnel unreachable"),
+        }
+    matched = int(res.get("matched", 0) or 0)
+    return {
+        "ok": matched >= _VERIFY_MIN_MATCHES,
+        "verified": matched >= _VERIFY_MIN_MATCHES,
+        "verify_unavailable": False,
+        "matched": matched,
+        "tag": res.get("tag", ""),
+        "text": (res.get("text") or "")[:160],
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def accept_proposal(user_id: str, proposal_id: str) -> dict:
+    """Accept a proposed replacement selector.
+
+    GATE: before the AI selector is trusted, it is validated against the LIVE
+    page DOM through the user's Playwright MCP tunnel (see _verify_proposal_live).
+    A blind Accept of a broken Groq proposal would silently break extraction —
+    exactly the failure mode self-healing is meant to prevent — so we refuse to
+    ship an unverified selector. If the tunnel is down the caller gets
+    `verify_unavailable: True` and the proposal stays pending for retry.
+    """
+    # --- Verification (outside the storage lock: MCP I/O can be slow) ---
     with _lock(user_id):
         data = _load(user_id)
-        for pr in data["proposals"]:
-            if pr["id"] == proposal_id:
-                pr["status"] = "accepted"
-                k = _key(pr["platform"], pr["action"])
-                entry = data["selectors"].get(k)
-                if entry:
-                    entry["selector"] = pr["new_selector"]
-                    entry["status"] = "healthy"
-                    entry["consecutive_failures"] = 0
-                    entry["proposed"] = None
-                _save(user_id, data)
-                return {"ok": True, "selector": pr["new_selector"]}
-        return {"ok": False, "error": "proposal not found"}
+        pr = next((p for p in data["proposals"] if p["id"] == proposal_id), None)
+        if not pr:
+            return {"ok": False, "error": "proposal not found"}
+        if pr.get("status") == "accepted":
+            return {"ok": True, "already_accepted": True, "selector": pr["new_selector"]}
+        # Snapshot what we need to verify without holding the lock during I/O.
+        verify_snapshot = {
+            "verify_url": pr.get("verify_url", ""),
+            "new_selector": pr.get("new_selector", ""),
+        }
+
+    verify = _verify_proposal_live(verify_snapshot)
+
+    # --- Apply only if verification passed ---
+    with _lock(user_id):
+        data = _load(user_id)
+        pr = next((p for p in data["proposals"] if p["id"] == proposal_id), None)
+        if not pr:
+            return {"ok": False, "error": "proposal not found"}
+        # Persist the verification result so the Mini App shows it.
+        pr["verified"] = {
+            "ok": verify.get("verified", False),
+            "matched": verify.get("matched", 0),
+            "tag": verify.get("tag", ""),
+            "text": verify.get("text", ""),
+            "checked_at": verify.get("checked_at", ""),
+            "verify_unavailable": verify.get("verify_unavailable", False),
+            "error": verify.get("error", ""),
+        }
+
+        if not verify.get("verified"):
+            # Verification failed OR tunnel down. Keep the proposal pending so
+            # the user can retry once the tunnel is up; do NOT apply the selector.
+            pr["status"] = "pending"
+            _save(user_id, data)
+            return {
+                "ok": False,
+                "rejected_by_verify": not verify.get("verify_unavailable", False),
+                "verify_unavailable": verify.get("verify_unavailable", False),
+                "verify": pr["verified"],
+                "message": (
+                    "Selector did not match the live page — not applied. "
+                    "Ask Groq for a new proposal or fix it manually."
+                    if not verify.get("verify_unavailable", False) else
+                    "MCP tunnel is down. Start it on your PC (see Settings → "
+                    "Advanced → Browser MCP) and retry Accept."
+                ),
+            }
+
+        # Verified → safe to ship.
+        pr["status"] = "accepted"
+        k = _key(pr["platform"], pr["action"])
+        entry = data["selectors"].get(k)
+        if entry:
+            entry["selector"] = pr["new_selector"]
+            entry["status"] = "healthy"
+            entry["consecutive_failures"] = 0
+            entry["proposed"] = None
+        _save(user_id, data)
+        return {
+            "ok": True,
+            "selector": pr["new_selector"],
+            "verify": pr["verified"],
+        }
 
 
 def reject_proposal(user_id: str, proposal_id: str) -> dict:

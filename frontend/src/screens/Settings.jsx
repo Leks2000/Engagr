@@ -214,14 +214,12 @@ function RelevancePanel({ userId, onSettingsUpdate, settings }) {
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm">Enable filtering</span>
         <button
-          className="toggle-track"
+          className={`toggle-track ${filteringEnabled ? 'active' : ''}`}
           role="switch"
           aria-checked={filteringEnabled}
           onClick={() => { const v = !filteringEnabled; setFilteringEnabled(v); save(v, minScore) }}
         >
-          <span className={`toggle-track ${filteringEnabled ? 'active' : ''}`}>
-            <span className="toggle-knob" />
-          </span>
+          <span className="toggle-knob" />
         </button>
       </div>
 
