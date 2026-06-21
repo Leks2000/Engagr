@@ -143,6 +143,21 @@ export default function Analytics({ userId, language = 'en' }) {
                 <p className="text-[10px]" style={{ color: '#94a3b8' }}>Groq llama-3.3-70b</p>
               </div>
             </div>
+            {data.groq_calls_saved > 0 && (
+              <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid #f1f5f9' }}>
+                <div>
+                  <p className="text-[11px] font-semibold" style={{ color: '#047857' }}>
+                    Filter saved {data.groq_calls_saved} Groq calls
+                  </p>
+                  <p className="text-[10px]" style={{ color: '#94a3b8' }}>
+                    Spam / low-relevance / duplicates removed before variant generation
+                  </p>
+                </div>
+                <p className="text-sm font-bold" style={{ color: '#047857' }}>
+                  ~{fmtCost(data.groq_cost_saved_usd)} saved
+                </p>
+              </div>
+            )}
           </div>
 
           {/* ── Per-platform breakdown ──────────────────────────────────── */}
