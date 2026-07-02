@@ -181,6 +181,38 @@ Advanced features such as Ideas Engine, analytics, relevance scoring, and smart 
 
 ---
 
+## Project progress
+
+This section mirrors the active roadmap in [PROJECT_PLAN.md](PROJECT_PLAN.md) so progress is visible from the repository front page.
+
+### Done
+
+- ✅ Phase 0: posts can flow into the queue, generate AI variants, and be approved.
+- ✅ Phase 1: approved actions are executed by the Chrome extension with status updates.
+- ✅ Phase 2: like/upvote and connect/follow actions are part of the approved action chain.
+- ✅ Reddit backend discovery exists as the reference fallback model via public JSON.
+- ✅ Stage 7 research and implementation plan for X/LinkedIn backend discovery has been documented.
+
+### In progress / next
+
+- ⏳ Phase 3: simplify Mini App navigation to Feed · Queue · Settings · Profile.
+- ⏳ Stage 7.2: add `backend/x_public.py` with provider modes `mcp`, `twitterapi`, and `off`, plus `seen_x.json` dedupe and keyword/relevance handoff.
+- ⏳ Stage 7.4: add `backend/linkedin_mcp.py` using Browser MCP only, with `seen_linkedin.json` dedupe.
+- ⏳ Stage 7.5: wire X and LinkedIn discovery into the scheduler with conservative intervals and provider settings.
+- ⏳ Stage 7.7–7.8: add Morning Brief and batch approve.
+- ⏳ Stage 7.9: add default-off semi-autopilot with trust threshold and daily cap.
+- ⏳ Stage 7.10: add engagement tracking feedback loop into interaction memory.
+- ⏳ Stage 7.11: add tests and smoke checks for new discovery modules.
+
+### Safety stance
+
+- Human approval stays required by default.
+- X and LinkedIn execution stays in the user's browser through the extension.
+- LinkedIn backend discovery is planned only through Browser MCP, not direct Voyager/cookie scraping.
+- Backend discovery modules must dedupe and respect daily limits before queueing items.
+
+---
+
 ## License
 
 MIT
