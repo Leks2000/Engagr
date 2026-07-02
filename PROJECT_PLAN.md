@@ -1,6 +1,6 @@
 # Engagr — Project Plan (Source of Truth)
 
-> **Last updated:** 2026-06-19 (media proxy + visual pass iteration)
+> **Last updated:** 2026-07-02 (Stage 7 research + backend discovery plan)
 > **Status:** Active development plan
 > **For AI agents:** Read this file before implementing features. Phases are ordered — do not skip Phase 0–1 unless explicitly asked. Check off tasks in this file when completed.
 
@@ -10,7 +10,7 @@
 
 **Chrome Extension parses LinkedIn / X / Reddit → Railway backend + Groq AI prepares comment variants → user approves in Telegram Mini App → Extension automatically posts comment, like, connect/follow.**
 
-Reddit discovery additionally runs on the backend (public JSON) as a fallback when the browser is closed.
+Reddit discovery additionally runs on the backend (public JSON) as a fallback when the browser is closed. Stage 7 extends this fallback model to X and LinkedIn using safe provider boundaries: X can use MCP or official API discovery; LinkedIn backend discovery must use the user browser via MCP only.
 
 ---
 
@@ -163,6 +163,76 @@ Reddit discovery additionally runs on the backend (public JSON) as a fallback wh
 | 4.2 | Filter promoted / ads / too-short posts | [ ] |
 | 4.3 | Backend Reddit scheduler as background fallback | [ ] |
 | 4.4 | Minimum engagement threshold (likes/comments on post) | [ ] |
+
+
+---
+
+## Stage 7 — Backend discovery for X/LinkedIn (research + implementation plan)
+
+**Goal:** Add backend discovery fallbacks for X and LinkedIn without changing the approval-first safety model. The extension remains the primary parser/executor when the user's browser is active; backend discovery only fills the queue when the browser is closed or the extension has not pushed fresh items.
+
+### Research summary
+
+| Platform | Current state | Recommended backend path | Explicitly avoided | Risk notes |
+|----------|---------------|--------------------------|--------------------|------------|
+| **Reddit** | Two-layer discovery already exists: `backend/reddit_public.py` plus extension DOM parser | Keep as the reference implementation for new backend discovery modules | OAuth-only dependency for MVP | Low–medium; public JSON and dedupe are already implemented |
+| **X** | Extension DOM parser exists; backend has trends only, not feed/search discovery | Add `backend/x_public.py` with provider switch: `mcp`, `twitterapi`, or `off` | Unofficial scraping that bypasses logged-in browser/session patterns | Medium; use MCP as free fallback, official API when configured |
+| **LinkedIn** | Extension DOM parser exists; cookie/Voyager legacy path exists but is high-risk | Add `backend/linkedin_mcp.py` that uses Browser MCP to open/search with the user's real browser session | Server-side Voyager/cookie fallback as a primary path | High; backend path must be MCP-only and rate-limited |
+
+### Core product decision
+
+Build a **Unified Discovery Layer** with a stable contract:
+
+```python
+def discover(user_id: str, max_posts: int = 20) -> list[Post]:
+    ...
+```
+
+Adapters feed the same existing pipeline: `posts/push` → keyword filter → relevance scoring → queue → Telegram/Mini App approval. The user should not need to know whether a post came from extension DOM parsing, Reddit JSON, X MCP/API discovery, or LinkedIn MCP discovery.
+
+### Provider policy
+
+| Provider | Env/config | Use case | Default |
+|----------|------------|----------|---------|
+| X MCP | `X_DISCOVERY_PROVIDER=mcp` | Free fallback through the user's real browser session | Preferred free option |
+| X official API | `X_DISCOVERY_PROVIDER=twitterapi` | Paid/official search where tokens are configured | Optional |
+| X off | `X_DISCOVERY_PROVIDER=off` | Disable backend X discovery | Safe fallback |
+| LinkedIn MCP | `LINKEDIN_DISCOVERY_PROVIDER=mcp` | User-browser search/content discovery via Browser MCP | Only supported backend path |
+| LinkedIn off | `LINKEDIN_DISCOVERY_PROVIDER=off` | Disable backend LinkedIn discovery | Safe fallback |
+
+### Implementation checklist
+
+| ID | Task | Files / area | Done |
+|----|------|--------------|------|
+| 7.1 | Record Stage 7 research and implementation plan | `PROJECT_PLAN.md`, `README.md` | [x] |
+| 7.2 | Add X backend discovery mirror of Reddit public parser: `scrape_posts(user_id, max_posts)`, `seen_x.json`, keyword filtering, relevance scoring handoff | `backend/x_public.py`, tests | [ ] |
+| 7.3 | Add provider switch for X: `mcp`, `twitterapi`, `off`; default to `off` unless explicitly configured | `backend/config.py` / env usage, scheduler | [ ] |
+| 7.4 | Add LinkedIn MCP scanner using Browser MCP navigation/search and DOM extraction; dedupe via `seen_linkedin.json` | `backend/linkedin_mcp.py`, tests | [ ] |
+| 7.5 | Wire scheduler sessions for X and LinkedIn MCP with conservative intervals and per-user limits | `backend/scheduler.py` | [ ] |
+| 7.6 | Keep execution approval-first and extension-only for X/LinkedIn actions | backend + extension docs | [ ] |
+| 7.7 | Add Morning Brief: daily Telegram summary with found/filtered/ready counts | `backend/morning_brief.py`, `backend/telegram_bot.py` | [ ] |
+| 7.8 | Add batch approve endpoint and Telegram buttons for top-N approvals | `backend/main.py`, `backend/telegram_bot.py`, frontend queue | [ ] |
+| 7.9 | Add semi-autopilot settings: relevance threshold, humanness gate, daily cap, default cap `0` | backend settings + queue approval flow | [ ] |
+| 7.10 | Add engagement feedback loop through MCP/extension checks of published comments | `backend/engagement_tracker.py`, `backend/interaction_memory.py` | [ ] |
+| 7.11 | Add tests for X discovery, LinkedIn MCP smoke behavior, scheduler wiring, and provider-off behavior | `tests/` | [ ] |
+
+### Safety constraints
+
+- Human approval remains required by default.
+- Semi-autopilot must default to disabled (`0` auto-approvals/day).
+- X/LinkedIn posting remains extension-executed after approval, not server-side.
+- LinkedIn backend discovery must not use Voyager/cookie scraping as the primary implementation.
+- MCP scans must be rate-limited and should mimic normal user browsing cadence.
+- All discovery modules must dedupe before enqueueing to avoid repeated comments on the same post.
+
+### Suggested priority order
+
+1. Finish Phase 3 Mini App simplification so the user has a clean daily workflow.
+2. Implement `backend/x_public.py` with `mcp/off` first; add `twitterapi` only when credentials and cost are accepted.
+3. Implement `backend/linkedin_mcp.py` with conservative scheduling.
+4. Add Morning Brief and batch approve to reduce daily taps.
+5. Add semi-autopilot with default-off guardrails.
+6. Add engagement tracking and interaction-memory feedback.
 
 ---
 
